@@ -1,0 +1,158 @@
+#!/opt/rrule-venv/bin/python
+"""Expand calendar occurrences from a calendula item listing.
+
+    calendula -c CONF --json items list CAL > items.json
+    expand-recurrences items.json --from 2026-09-20 --to 2026-10-12
+
+Prints one TSV line per occurrence: date, time, summary, categories,
+transp, component, id. An item whose recurrence the library cannot expand
+is reported on the last field instead of being dropped silently.
+
+Times print in the zone from `--tz`, or in each item's own zone when `--tz`
+is absent. The window runs from `--from` to `--to` inclusive, and an
+occurrence counts when it starts inside it.
+"""
+
+import argparse
+import datetime as dt
+import json
+from zoneinfo import ZoneInfo
+
+import icalendar
+import recurring_ical_events
+
+COMPONENTS = ("VEVENT", "VTODO", "VJOURNAL")
+
+
+def in_zone(value, tz):
+    """Move an aware datetime into `tz`, and leave a date or naive value alone."""
+    if isinstance(value, dt.datetime) and value.tzinfo is not None and tz is not None:
+        return value.astimezone(tz)
+    return value
+
+
+def start_of(component):
+    value = component.get("DTSTART")
+    return value.dt if value is not None else None
+
+
+def day_of(value, tz):
+    value = in_zone(value, tz)
+    return value.date() if isinstance(value, dt.datetime) else value
+
+
+def key_of(component, tz):
+    """Identify one occurrence, to drop a duplicate of it."""
+    return (str(component.get("UID", "")), in_zone(start_of(component), tz).isoformat())
+
+
+def row_of(component, tz, item_id):
+    """Build one TSV row, or None when the occurrence has no start."""
+    start = start_of(component)
+    if start is None:
+        return None
+    start = in_zone(start, tz)
+    if not isinstance(start, dt.datetime):
+        text = "ALL-DAY"
+    else:
+        end = component.get("DTEND") or component.get("DUE")
+        end = in_zone(end.dt, tz) if end is not None else None
+        text = f"{start:%H:%M}" if end is None or end == start else f"{start:%H:%M}-{end:%H:%M}"
+    return (start.strftime("%Y-%m-%d"), text, str(component.get("SUMMARY", "?")),
+            categories(component), str(component.get("TRANSP", "-")),
+            component.name, item_id)
+
+
+def categories(component):
+    value = component.get("CATEGORIES")
+    if value is None:
+        return "-"
+    entries = value if isinstance(value, list) else [value]
+    names = []
+    for entry in entries:
+        cats = getattr(entry, "cats", None)
+        if cats is None:
+            names.extend(str(entry).replace("\\,", ",").split(","))
+        else:
+            names.extend(str(cat) for cat in cats)
+    return ",".join(name for name in names if name) or "-"
+
+
+def window(lo_date, hi_date, tz):
+    """Build the inclusive `--from`..`--to` window for `between`.
+
+    `between` keeps occurrences at or after the start and before the end, so the
+    end lands on the day after `--to`. With no `--tz`, the window stays in dates
+    and `between` compares each item's own calendar date.
+    """
+    end_date = hi_date + dt.timedelta(days=1)
+    if tz is None:
+        return lo_date, end_date
+    return (dt.datetime.combine(lo_date, dt.time(), tzinfo=tz),
+            dt.datetime.combine(end_date, dt.time(), tzinfo=tz))
+
+
+def expand(item, lo, end, tz, lo_date, hi_date):
+    """Return the TSV rows of one item, or one UNSUPPORTED row."""
+    try:
+        calendar = icalendar.Calendar.from_ical(item["ical"])
+        occurrences = recurring_ical_events.of(calendar, components=COMPONENTS).between(lo, end)
+    except Exception as err:
+        return [(lo_date.strftime("%Y-%m-%d"), "ALL-DAY", "?", "-", "-", "?",
+                 f"UNSUPPORTED RRULE: {err}")]
+
+    rows, seen = [], set()
+    for component in occurrences:
+        start = start_of(component)
+        if start is None or not lo_date <= day_of(start, tz) <= hi_date:
+            continue
+        row = row_of(component, tz, item["id"])
+        if row is not None:
+            seen.add(key_of(component, tz))
+            rows.append(row)
+
+    # The library drops an override whose `RECURRENCE-ID` instance also sits in
+    # `EXDATE`, which is how a calendar client records a moved occurrence. Emit
+    # any such override itself, unless its occurrence already came through.
+    for component in calendar.walk():
+        if component.name not in COMPONENTS or component.get("RECURRENCE-ID") is None:
+            continue
+        start = start_of(component)
+        if start is None or not lo_date <= day_of(start, tz) <= hi_date:
+            continue
+        if key_of(component, tz) in seen:
+            continue
+        row = row_of(component, tz, item["id"])
+        if row is not None:
+            rows.append(row)
+
+    return rows
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("items_json")
+    ap.add_argument("--from", dest="lo", required=True, help="YYYY-MM-DD")
+    ap.add_argument("--to", dest="hi", required=True, help="YYYY-MM-DD")
+    ap.add_argument("--tz", help="IANA zone to normalise into, e.g. Europe/Berlin")
+    args = ap.parse_args()
+
+    tz = ZoneInfo(args.tz) if args.tz else None
+    lo_date = dt.datetime.strptime(args.lo, "%Y-%m-%d").date()
+    hi_date = dt.datetime.strptime(args.hi, "%Y-%m-%d").date()
+    lo, end = window(lo_date, hi_date, tz)
+
+    with open(args.items_json) as fh:
+        items = json.load(fh)
+
+    rows = []
+    for item in items:
+        rows.extend(expand(item, lo, end, tz, lo_date, hi_date))
+
+    for row in sorted(rows, key=lambda row: (row[0], row[1])):
+        print("\t".join(row))
+
+
+if __name__ == "__main__":
+    main()

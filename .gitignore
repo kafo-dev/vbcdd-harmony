@@ -1,0 +1,17 @@
+# Build output. `make build` writes `vbcdd-harmony`; a bare `go build .`
+# writes `harmony`.
+/vbcdd-harmony
+/harmony
+
+# Local state and scratch files.
+*.tmp
+*.toml
+!config.example.toml
+
+# Python bytecode from the deploy scripts.
+__pycache__/
+
+# `vale` styles, fetched by `vale sync`
+styles/
+# The formatter config stays tracked despite the `*.toml` rule above.
+!.rumdl.toml

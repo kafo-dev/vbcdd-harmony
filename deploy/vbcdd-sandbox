@@ -1,0 +1,29 @@
+#!/bin/sh
+
+# Run the agent inside a bubblewrap sandbox. The state directory, the pi state,
+# the cache, and the agent's own virtual environments stay writable; the rest of
+# the host is read-only, and the bridge config that holds the ntfy token is
+# masked. The caller passes the command to run, usually `/opt/pi-coding-agent/pi`
+# with its arguments.
+set -eu
+
+HOME=${HOME:-/home/vbcdd}
+STATE=$(pwd -P)
+
+exec bwrap \
+	--ro-bind / / \
+	--dev /dev \
+	--proc /proc \
+	--tmpfs /tmp \
+	--bind "$HOME/.pi" "$HOME/.pi" \
+	--bind "$STATE" "$STATE" \
+	--bind-try "$HOME/.cache" "$HOME/.cache" \
+	--bind-try "$HOME/.venvs" "$HOME/.venvs" \
+	--bind-try "$HOME/.local/share/uv" "$HOME/.local/share/uv" \
+	--tmpfs "$HOME/.config/vbcdd/harmony" \
+	--unshare-all \
+	--share-net \
+	--die-with-parent \
+	--new-session \
+	--chdir "$STATE" \
+	-- "$@"
