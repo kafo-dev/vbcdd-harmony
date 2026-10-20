@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -160,7 +161,47 @@ var toolNameRe = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
 // clockRe is a time of day, from midnight to one minute before the next one.
 // [time.Parse] accepts a single-digit hour, which reads as 5:32 in one place
 // and 05:32 in another.
-var clockRe = regexp.MustCompile(`^([01][0-9]|2[0-3]):[0-5][0-9]$`)
+var clockRe = regexp.MustCompile(`^([01][0-9]|2[0-3]):([0-5][0-9])$`)
+
+// weekdays maps the abbreviation a schedule names to its day. [time.Parse]
+// cannot do this: it takes the layout's weekday field for a date to check
+// against, not for the answer, so parsing "Sun" with the layout "Mon" reports
+// the weekday of the reference date.
+var weekdays = map[string]time.Weekday{
+	"Sun": time.Sunday,
+	"Mon": time.Monday,
+	"Tue": time.Tuesday,
+	"Wed": time.Wednesday,
+	"Thu": time.Thursday,
+	"Fri": time.Friday,
+	"Sat": time.Saturday,
+}
+
+// Clock reads a time of day and returns its hour and its minute.
+func Clock(value string) (int, int, error) {
+	parts := clockRe.FindStringSubmatch(value)
+	if parts == nil {
+		return 0, 0, fmt.Errorf("time %q is not HH:MM", value)
+	}
+	hour, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return 0, 0, fmt.Errorf("time %q is not HH:MM", value)
+	}
+	minute, err := strconv.Atoi(parts[2])
+	if err != nil {
+		return 0, 0, fmt.Errorf("time %q is not HH:MM", value)
+	}
+	return hour, minute, nil
+}
+
+// Day returns the weekday an abbreviation names.
+func Day(value string) (time.Weekday, error) {
+	day, ok := weekdays[value]
+	if !ok {
+		return 0, fmt.Errorf("weekday %q is not a weekday abbreviation", value)
+	}
+	return day, nil
+}
 
 // LoadAll reads every profile below the profiles root, sorted by name. A
 // directory whose name is not a valid profile name is ignored; one that is
@@ -356,14 +397,14 @@ func (s Schedule) check() error {
 	case s.Time == "":
 		return fmt.Errorf("run names neither time nor interval_minutes")
 	}
-	if !clockRe.MatchString(s.Time) {
-		return fmt.Errorf("run time %q is not HH:MM", s.Time)
+	if _, _, err := Clock(s.Time); err != nil {
+		return err
 	}
 	if s.Weekday == "" {
 		return nil
 	}
-	if _, err := time.Parse("Mon", s.Weekday); err != nil {
-		return fmt.Errorf("run weekday %q is not a weekday abbreviation", s.Weekday)
+	if _, err := Day(s.Weekday); err != nil {
+		return err
 	}
 	return nil
 }
