@@ -100,6 +100,20 @@ func (h Hook) Matches(body string) bool {
 	return h.match.MatchString(body)
 }
 
+// Compile returns the hook with its pattern ready to match. A hook that names
+// no pattern matches every message.
+func (h Hook) Compile() (Hook, error) {
+	if h.Match == "" {
+		return h, nil
+	}
+	pattern, err := regexp.Compile(h.Match)
+	if err != nil {
+		return Hook{}, fmt.Errorf("match %q: %w", h.Match, err)
+	}
+	h.match = pattern
+	return h, nil
+}
+
 // Job is one timed run.
 //
 // Exactly one of Prompt and Command is required: a prompt calls the agent,
@@ -302,14 +316,11 @@ func checkHooks(dir string, hooks []Hook) ([]Hook, error) {
 		default:
 			return nil, fmt.Errorf("%s: mode %q is not %q or %q", where, hook.Mode, Alter, Override)
 		}
-		if hook.Match == "" {
-			continue
-		}
-		pattern, err := regexp.Compile(hook.Match)
+		compiled, err := hook.Compile()
 		if err != nil {
-			return nil, fmt.Errorf("%s: match %q: %w", where, hook.Match, err)
+			return nil, fmt.Errorf("%s: %w", where, err)
 		}
-		hooks[i].match = pattern
+		hooks[i] = compiled
 	}
 	return hooks, nil
 }

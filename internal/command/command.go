@@ -38,6 +38,10 @@ type Runner struct {
 	Timeout time.Duration
 	// Log receives the diagnostics. Nil drops them.
 	Log *slog.Logger
+	// FailOnError turns a non-zero exit into an error. A tool leaves it
+	// false, because its output is what the model needs to see; a hook sets
+	// it, because a hook that fails silently rewrites the prompt to nothing.
+	FailOnError bool
 }
 
 // Run runs one command with the given arguments and returns what it prints.
@@ -79,6 +83,9 @@ func (r Runner) Run(ctx context.Context, name string, args map[string]any) (stri
 			return "", fmt.Errorf("%s: %w", name, err)
 		}
 		r.logf(ctx, "%s exited %d: %s", name, exit.ExitCode(), strings.TrimSpace(stderr.String()))
+		if r.FailOnError {
+			return stdout.String(), fmt.Errorf("%s exited %d", name, exit.ExitCode())
+		}
 	}
 	return stdout.String(), nil
 }

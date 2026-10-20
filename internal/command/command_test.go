@@ -90,6 +90,14 @@ func TestRunReturnsTheOutputOfAFailingCommand(t *testing.T) {
 	}
 }
 
+func TestRunReportsAFailingCommandWhenAsked(t *testing.T) {
+	t.Parallel()
+	runner := Runner{FailOnError: true}
+	if _, err := run(t, runner, script(t, "echo out; exit 3"), nil); err == nil {
+		t.Fatal("Run accepted a command that failed")
+	}
+}
+
 func TestRunReportsATimeout(t *testing.T) {
 	t.Parallel()
 	runner := Runner{Timeout: 50 * time.Millisecond}
