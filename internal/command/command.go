@@ -1,4 +1,8 @@
-package tool
+// Package command runs a profile's external commands: the target behind a
+// tool, a hook, or a job. One command receives its arguments as JSON on
+// standard input and again as `VBCDD_ARG_<NAME>` variables, and answers on
+// standard output.
+package command
 
 import (
 	"bytes"
@@ -9,6 +13,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -16,14 +21,14 @@ import (
 )
 
 // argEnvPrefix starts the name of the environment variable that carries one
-// argument, so a shell target reaches an argument without parsing the JSON.
+// argument, so a shell command reaches an argument without parsing the JSON.
 const argEnvPrefix = "VBCDD_ARG_"
 
 // killGrace is how long [exec.Cmd.Wait] waits for the pipes to close after a
-// canceled target is killed.
+// canceled command is killed.
 const killGrace = time.Second
 
-// Runner runs a tool's target as a child process.
+// Runner runs a command as a child process.
 type Runner struct {
 	// Dir is the working directory of the child. Empty means the parent's.
 	Dir string
@@ -35,15 +40,15 @@ type Runner struct {
 	Log *slog.Logger
 }
 
-// Run hands the call's arguments to the target and returns what it prints.
+// Run runs one command with the given arguments and returns what it prints.
 //
-// Standard output always returns, whatever the target exits with. A non-zero
+// Standard output always returns, whatever the command exits with. A non-zero
 // exit is logged and yields no error, because the output usually explains the
-// failure; a timeout or a target that never starts does yield one.
-func (r Runner) Run(ctx context.Context, spec Spec, args map[string]any) (string, error) {
+// failure; a timeout or a command that never starts does yield one.
+func (r Runner) Run(ctx context.Context, name string, args map[string]any) (string, error) {
 	payload, err := json.Marshal(args)
 	if err != nil {
-		return "", fmt.Errorf("tool %s: encode arguments: %w", spec.Target, err)
+		return "", fmt.Errorf("%s: encode arguments: %w", name, err)
 	}
 	if r.Timeout > 0 {
 		var cancel context.CancelFunc
@@ -51,7 +56,7 @@ func (r Runner) Run(ctx context.Context, spec Spec, args map[string]any) (string
 		defer cancel()
 	}
 
-	cmd := exec.CommandContext(ctx, spec.Target) //nolint:gosec // the target comes from the profile.
+	cmd := exec.CommandContext(ctx, name)
 	cmd.Dir = r.Dir
 	cmd.Env = r.childEnv(args)
 	cmd.Stdin = bytes.NewReader(payload)
@@ -66,20 +71,20 @@ func (r Runner) Run(ctx context.Context, spec Spec, args map[string]any) (string
 	cmd.Stderr = &stderr
 	err = cmd.Run()
 	if ctx.Err() != nil {
-		return stdout.String(), fmt.Errorf("tool %s: %w", spec.Target, ctx.Err())
+		return stdout.String(), fmt.Errorf("%s: %w", name, ctx.Err())
 	}
 	if err != nil {
 		var exit *exec.ExitError
 		if !errors.As(err, &exit) {
-			return "", fmt.Errorf("tool %s: %w", spec.Target, err)
+			return "", fmt.Errorf("%s: %w", name, err)
 		}
-		r.logf(ctx, "tool %s exited %d: %s", spec.Target, exit.ExitCode(), strings.TrimSpace(stderr.String()))
+		r.logf(ctx, "%s exited %d: %s", name, exit.ExitCode(), strings.TrimSpace(stderr.String()))
 	}
 	return stdout.String(), nil
 }
 
-// killGroup kills the target and every process it started. The runner puts the
-// target in its own process group, so a negative pid reaches the group.
+// killGroup kills a command and every process it started. The runner puts the
+// command in its own process group, so a negative pid reaches the group.
 func killGroup(cmd *exec.Cmd) error {
 	if cmd.Process == nil {
 		return os.ErrProcessDone
@@ -133,6 +138,17 @@ func envValue(value any) string {
 	default:
 		return fmt.Sprintf("%v", typed)
 	}
+}
+
+// sortedKeys returns a map's keys in a stable order, so the environment does
+// not move between runs.
+func sortedKeys(values map[string]any) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // logf writes one diagnostic line, and drops it when the runner has no logger.

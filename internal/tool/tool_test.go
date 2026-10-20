@@ -1,18 +1,9 @@
 package tool
 
 import (
-	"bytes"
-	"context"
 	"encoding/json"
-	"errors"
-	"fmt"
-	"log/slog"
-	"os"
-	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
-	"time"
 )
 
 const declaration = `
@@ -28,30 +19,6 @@ func mustParse(t *testing.T, body string) Spec {
 		t.Fatalf("Parse: %v", err)
 	}
 	return spec
-}
-
-// script writes an executable shell script into a temporary directory and
-// returns its path, which doubles as a command name.
-func script(t *testing.T, body string) string {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "target")
-	if err := os.WriteFile(path, []byte("#!/bin/sh\n"+body+"\n"), 0o700); err != nil {
-		t.Fatalf("write script: %v", err)
-	}
-	return path
-}
-
-// run runs a target, retrying once on ETXTBSY. Linux refuses to execute a file
-// that any process still holds open for writing, and under a loaded parallel
-// test run a child forked by another test can inherit the descriptor of a
-// script this one has just written.
-func run(t *testing.T, runner Runner, spec Spec, args map[string]any) (string, error) {
-	t.Helper()
-	out, err := runner.Run(context.Background(), spec, args)
-	if err != nil && errors.Is(err, syscall.ETXTBSY) {
-		return runner.Run(context.Background(), spec, args)
-	}
-	return out, err
 }
 
 func TestParseReadsTheDeclaration(t *testing.T) {
@@ -163,100 +130,5 @@ func TestValidateRejectsBadCalls(t *testing.T) {
 				t.Fatalf("Validate error = %q, want it to mention %q", err, tc.want)
 			}
 		})
-	}
-}
-
-func TestRunFeedsTheArgumentsOnStdin(t *testing.T) {
-	t.Parallel()
-	spec := mustParse(t, "description = \"d\"\ntarget = \""+script(t, "cat")+"\"\n")
-	got, err := run(t, Runner{}, spec, map[string]any{"cmd": "ls"})
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	if strings.TrimSpace(got) != `{"cmd":"ls"}` {
-		t.Fatalf("stdout = %q, want the arguments", got)
-	}
-}
-
-func TestRunExportsTheArguments(t *testing.T) {
-	t.Parallel()
-	body := `printf '%s|%s' "$VBCDD_ARG_CMD" "$VBCDD_ARG_DRY_RUN"`
-	spec := mustParse(t, "description = \"d\"\ntarget = \""+script(t, body)+"\"\n")
-	got, err := run(t, Runner{}, spec, map[string]any{"cmd": "ls", "dry-run": true})
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	if got != "ls|true" {
-		t.Fatalf("stdout = %q, want %q", got, "ls|true")
-	}
-}
-
-func TestRunReturnsTheOutputOfAFailingTarget(t *testing.T) {
-	t.Parallel()
-	spec := mustParse(t, "description = \"d\"\ntarget = \""+script(t, "echo out; exit 3")+"\"\n")
-	var logged bytes.Buffer
-	runner := Runner{Log: slog.New(slog.NewTextHandler(&logged, nil))}
-	got, err := run(t, runner, spec, nil)
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	if strings.TrimSpace(got) != "out" {
-		t.Fatalf("stdout = %q, want the output", got)
-	}
-	if !strings.Contains(logged.String(), "exited 3") {
-		t.Fatalf("log = %q, want the exit status", logged.String())
-	}
-}
-
-func TestRunReportsATimeout(t *testing.T) {
-	t.Parallel()
-	spec := mustParse(t, "description = \"d\"\ntarget = \""+script(t, "sleep 5")+"\"\n")
-	runner := Runner{Timeout: 50 * time.Millisecond}
-	if _, err := run(t, runner, spec, nil); err == nil {
-		t.Fatal("Run accepted a target that never finished")
-	}
-}
-
-func TestRunReportsAMissingTarget(t *testing.T) {
-	t.Parallel()
-	spec := mustParse(t, "description = \"d\"\ntarget = \"no-such-command-anywhere\"\n")
-	if _, err := run(t, Runner{}, spec, nil); err == nil {
-		t.Fatal("Run accepted a target that does not exist")
-	}
-}
-
-func TestEnvName(t *testing.T) {
-	t.Parallel()
-	cases := map[string]string{
-		"cmd":     "CMD",
-		"dry-run": "DRY_RUN",
-		"maxSize": "MAXSIZE",
-		"a.b":     "A_B",
-	}
-	for name, want := range cases {
-		if got := envName(name); got != want {
-			t.Errorf("envName(%q) = %q, want %q", name, got, want)
-		}
-	}
-}
-
-func TestEnvValue(t *testing.T) {
-	t.Parallel()
-	cases := []struct {
-		value any
-		want  string
-	}{
-		{"ls", "ls"},
-		{true, "true"},
-		{false, "false"},
-		{json.Number("5"), "5"},
-		{nil, ""},
-		{[]string{"a"}, fmt.Sprint([]string{"a"})},
-	}
-	for _, tc := range cases {
-		got := envValue(tc.value)
-		if got != tc.want {
-			t.Errorf("envValue(%#v) = %q, want %q", tc.value, got, tc.want)
-		}
 	}
 }
