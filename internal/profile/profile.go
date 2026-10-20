@@ -25,6 +25,8 @@ const (
 	FileName = "profile.toml"
 	// PromptName is the file that holds the standing instruction.
 	PromptName = "system-prompt.md"
+	// HandoffName is the file that holds the handoff instruction.
+	HandoffName = "handoff.md"
 	// DocsDirName holds the documentation added to the standing instruction.
 	DocsDirName = "docs"
 	// ToolsDirName holds one TOML file per tool.
@@ -58,8 +60,35 @@ type Profile struct {
 	Hooks []Hook
 	// Jobs run on a timer.
 	Jobs []Job
+	// Handoff is where the conversation is handed off to a fresh one. Nil
+	// leaves the profile without one.
+	Handoff *Handoff
 
 	enabled *bool
+}
+
+// Handoff describes when one conversation gives way to a fresh one, and what
+// asks the outgoing conversation to write down for it.
+type Handoff struct {
+	// After hands off at the schedule's next occurrence.
+	After Schedule `toml:"after"`
+	// Tokens hands off once the conversation reaches this many tokens.
+	Tokens int `toml:"tokens"`
+	// Bytes hands off once the stored conversation reaches this many bytes.
+	Bytes int64 `toml:"bytes"`
+	// Prompt is the instruction, from the handoff file. It runs in the
+	// outgoing conversation, and its answer is the first message of the new
+	// one.
+	Prompt string `toml:"-"`
+}
+
+// Due reports whether a token or byte threshold has been met. A threshold of
+// zero is not set.
+func (h Handoff) Due(tokens int, bytes int64) bool {
+	if h.Tokens > 0 && tokens >= h.Tokens {
+		return true
+	}
+	return h.Bytes > 0 && bytes >= h.Bytes
 }
 
 // On reports whether the profile serves its topic. A profile is on unless its
@@ -147,9 +176,10 @@ type Schedule struct {
 
 // file is the shape of profile.toml.
 type file struct {
-	Enabled *bool  `toml:"enabled"`
-	Hooks   []Hook `toml:"hooks"`
-	Jobs    []Job  `toml:"jobs"`
+	Enabled *bool    `toml:"enabled"`
+	Handoff *Handoff `toml:"handoff"`
+	Hooks   []Hook   `toml:"hooks"`
+	Jobs    []Job    `toml:"jobs"`
 }
 
 // nameRe is the character set a profile directory name may use.
@@ -265,6 +295,11 @@ func Load(dir string) (Profile, error) {
 	if p.Jobs, err = checkJobs(dir, declared.Jobs); err != nil {
 		return Profile{}, err
 	}
+	if declared.Handoff != nil {
+		if p.Handoff, err = checkHandoff(dir, declared.Handoff); err != nil {
+			return Profile{}, err
+		}
+	}
 	return p, nil
 }
 
@@ -364,6 +399,32 @@ func checkHooks(dir string, hooks []Hook) ([]Hook, error) {
 		hooks[i] = compiled
 	}
 	return hooks, nil
+}
+
+// checkHandoff validates a declared handoff and reads its instruction.
+func checkHandoff(dir string, declared *Handoff) (*Handoff, error) {
+	where := filepath.Join(dir, FileName)
+	if declared.Tokens < 0 || declared.Bytes < 0 {
+		return nil, fmt.Errorf("%s: handoff thresholds cannot be negative", where)
+	}
+	if declared.Tokens == 0 && declared.Bytes == 0 && declared.After == (Schedule{}) {
+		return nil, fmt.Errorf("%s: handoff names no threshold", where)
+	}
+	if declared.After != (Schedule{}) {
+		if err := declared.After.check(); err != nil {
+			return nil, fmt.Errorf("%s: handoff: %w", where, err)
+		}
+	}
+	path := filepath.Join(dir, HandoffName)
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(string(body)) == "" {
+		return nil, fmt.Errorf("%s: handoff instruction is empty", path)
+	}
+	declared.Prompt = string(body)
+	return declared, nil
 }
 
 // checkJobs validates the job declarations.

@@ -278,3 +278,88 @@ mode = "alter"
 		}
 	}
 }
+
+func TestLoadReadsAHandoff(t *testing.T) {
+	t.Parallel()
+	dir := build(t, t.TempDir(), "general", "[handoff]\ntokens = 1000\nbytes = 4096\nafter = { time = \"04:00\" }\n")
+	write(t, filepath.Join(dir, HandoffName), "write down what the next conversation needs")
+	p, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if p.Handoff == nil {
+		t.Fatal("Handoff = nil, want the declaration")
+	}
+	if p.Handoff.Tokens != 1000 || p.Handoff.Bytes != 4096 {
+		t.Errorf("thresholds = %d %d", p.Handoff.Tokens, p.Handoff.Bytes)
+	}
+	if strings.TrimSpace(p.Handoff.Prompt) != "write down what the next conversation needs" {
+		t.Errorf("prompt = %q", p.Handoff.Prompt)
+	}
+	if p.Handoff.After.Time != "04:00" {
+		t.Errorf("after = %+v", p.Handoff.After)
+	}
+}
+
+func TestHandoffDue(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		handoff Handoff
+		tokens  int
+		bytes   int64
+		want    bool
+	}{
+		{"nothing set", Handoff{After: Schedule{Time: "04:00"}}, 100000, 100000, false},
+		{"under both", Handoff{Tokens: 100, Bytes: 200}, 99, 199, false},
+		{"at the token count", Handoff{Tokens: 100}, 100, 0, true},
+		{"over the token count", Handoff{Tokens: 100}, 101, 0, true},
+		{"at the byte count", Handoff{Bytes: 200}, 0, 200, true},
+		{"over the byte count", Handoff{Bytes: 200, Tokens: 100}, 1, 200, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := tc.handoff.Due(tc.tokens, tc.bytes); got != tc.want {
+				t.Fatalf("Due(%d, %d) = %v, want %v", tc.tokens, tc.bytes, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestLoadRejectsBadHandoffs(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name     string
+		handoff  string
+		withFile bool
+		want     string
+	}{
+		{"no threshold", "[handoff]\n", true, "names no threshold"},
+		{"negative tokens", "[handoff]\ntokens = -1\n", true, "cannot be negative"},
+		{"negative bytes", "[handoff]\nbytes = -1\n", true, "cannot be negative"},
+		{"bad schedule", "[handoff]\nafter = { time = \"4:00\" }\n", true, "is not HH:MM"},
+		{"missing instruction", "[handoff]\ntokens = 10\n", false, HandoffName},
+		{"empty instruction", "[handoff]\ntokens = 10\n", true, "handoff instruction is empty"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			dir := build(t, t.TempDir(), "general", tc.handoff)
+			if tc.withFile {
+				body := "write it down"
+				if tc.want == "handoff instruction is empty" {
+					body = "   \n"
+				}
+				write(t, filepath.Join(dir, HandoffName), body)
+			}
+			_, err := Load(dir)
+			if err == nil {
+				t.Fatal("Load accepted the handoff")
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Load error = %q, want it to mention %q", err, tc.want)
+			}
+		})
+	}
+}
