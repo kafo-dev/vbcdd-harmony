@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/BurntSushi/toml"
 )
@@ -18,6 +19,9 @@ const defaultDisplayName = "vbcdd-harmony"
 
 // defaultMaxTurns bounds the tool loop when the file names no other bound.
 const defaultMaxTurns = 20
+
+// defaultTimezone interprets a schedule when the file names no other zone.
+const defaultTimezone = "UTC"
 
 // Config is the daemon configuration, read from one TOML file.
 type Config struct {
@@ -41,6 +45,8 @@ type Config struct {
 	MaxTurns int `toml:"max_turns"`
 	// Headers join every request.
 	Headers map[string]string `toml:"headers"`
+	// Timezone interprets every schedule.
+	Timezone string `toml:"timezone"`
 
 	// Topics maps an ntfy topic to the profile that answers it.
 	Topics map[string]string `toml:"topics"`
@@ -68,7 +74,7 @@ func Load(path string) (*Config, error) {
 // Parse reads the configuration from TOML bytes and checks what the file
 // alone determines.
 func Parse(data []byte) (*Config, error) {
-	cfg := &Config{DisplayName: defaultDisplayName, MaxTurns: defaultMaxTurns}
+	cfg := &Config{DisplayName: defaultDisplayName, MaxTurns: defaultMaxTurns, Timezone: defaultTimezone}
 	if err := toml.Unmarshal(data, cfg); err != nil {
 		return nil, err
 	}
@@ -131,6 +137,9 @@ func (c *Config) check() error {
 	}
 	if c.MaxTurns < 1 {
 		return fmt.Errorf("max_turns is %d, want at least 1", c.MaxTurns)
+	}
+	if _, err := time.LoadLocation(c.Timezone); err != nil {
+		return fmt.Errorf("timezone %q: %w", c.Timezone, err)
 	}
 	for _, topic := range sortedKeys(c.Topics) {
 		if !topicRe.MatchString(topic) {
