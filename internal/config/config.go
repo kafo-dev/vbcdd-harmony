@@ -16,12 +16,34 @@ import (
 // defaultDisplayName titles a message when the file names no other.
 const defaultDisplayName = "vbcdd-harmony"
 
+// defaultMaxTurns bounds the tool loop when the file names no other bound.
+const defaultMaxTurns = 20
+
 // Config is the daemon configuration, read from one TOML file.
 type Config struct {
-	DisplayName string            `toml:"display_name"`
-	NtfyURL     string            `toml:"ntfy_url"`
-	NtfyToken   string            `toml:"ntfy_token"`
-	Topics      map[string]string `toml:"topics"`
+	DisplayName string `toml:"display_name"`
+	NtfyURL     string `toml:"ntfy_url"`
+	NtfyToken   string `toml:"ntfy_token"`
+
+	// BaseURL is the OpenAI-compatible endpoint every profile calls.
+	BaseURL string `toml:"base_url"`
+	// APIKey authenticates the endpoint.
+	APIKey string `toml:"api_key"`
+	// APIKeyCommand prints the key, and wins over APIKey.
+	APIKeyCommand string `toml:"api_key_command"`
+	// Model names the model every profile calls.
+	Model string `toml:"model"`
+	// ReasoningEffort is how much the model may spend on reasoning before it
+	// answers, as the endpoint defines it. Empty leaves the choice to the
+	// endpoint.
+	ReasoningEffort string `toml:"reasoning_effort"`
+	// MaxTurns bounds the tool loop of one request.
+	MaxTurns int `toml:"max_turns"`
+	// Headers join every request.
+	Headers map[string]string `toml:"headers"`
+
+	// Topics maps an ntfy topic to the profile that answers it.
+	Topics map[string]string `toml:"topics"`
 }
 
 // topicRe is the character set ntfy accepts in a topic name.
@@ -46,7 +68,7 @@ func Load(path string) (*Config, error) {
 // Parse reads the configuration from TOML bytes and checks what the file
 // alone determines.
 func Parse(data []byte) (*Config, error) {
-	cfg := &Config{DisplayName: defaultDisplayName}
+	cfg := &Config{DisplayName: defaultDisplayName, MaxTurns: defaultMaxTurns}
 	if err := toml.Unmarshal(data, cfg); err != nil {
 		return nil, err
 	}
@@ -92,8 +114,23 @@ func (c *Config) Validate(profiles []string) error {
 
 // check rejects a configuration the file itself proves wrong.
 func (c *Config) check() error {
-	if strings.TrimSpace(c.NtfyURL) == "" {
-		return fmt.Errorf("ntfy_url is empty")
+	for _, required := range []struct {
+		name  string
+		value string
+	}{
+		{"ntfy_url", c.NtfyURL},
+		{"base_url", c.BaseURL},
+		{"model", c.Model},
+	} {
+		if strings.TrimSpace(required.value) == "" {
+			return fmt.Errorf("%s is empty", required.name)
+		}
+	}
+	if c.APIKey == "" && c.APIKeyCommand == "" {
+		return fmt.Errorf("neither api_key nor api_key_command is set")
+	}
+	if c.MaxTurns < 1 {
+		return fmt.Errorf("max_turns is %d, want at least 1", c.MaxTurns)
 	}
 	for _, topic := range sortedKeys(c.Topics) {
 		if !topicRe.MatchString(topic) {
