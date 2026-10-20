@@ -1,6 +1,8 @@
 # vbcdd-harmony
 
-A ntfy bridge for a CalDAV calendar and a Gmail mailbox. It sends a daily digest and the alarms stored in each event, and it runs a scheduled mail triage. The topic also carries the other direction: an owner message reaches a `pi` coding agent that edits the calendar through the `calendula` CLI and the mail through the `himalaya` CLI.
+A bridge between ntfy topics and long-lived agents. Each topic routes to a **profile**: a standing prompt, the tools its agent may call, hooks that rewrite or answer a message before the agent sees it, and jobs that run on a timer.
+
+Two profiles ship with the repository. `general` answers with a shell and no isolation. `scheduler` answers with the same shell behind bubblewrap, and carries the calendar and mail tooling.
 
 > **Warning: Large Language Model-Generated Code**
 >
@@ -8,127 +10,245 @@ A ntfy bridge for a CalDAV calendar and a Gmail mailbox. It sends a daily digest
 
 ## How it works
 
-- `calendula` reads and writes the calendar (`items list`, `items create`, `items update`, `items delete`).
-- `deploy/expand-recurrences` turns each item into occurrences with `recurring-ical-events`, covering `RRULE`, `EXDATE`, `RDATE`, and `RECURRENCE-ID` overrides.
-- The `VALARM` triggers of each item are read from the same listing and turned into absolute fire times.
-- Every occurrence also raises an alarm at its start, unless a `VALARM` already fires then.
-- `himalaya` reads, searches, labels, moves, and sends the mail. A send waits for the owner's explicit confirmation in the same conversation.
-- The standing prompt carries both command surfaces, so no separate skill text is needed.
-- A scheduled triage runs on the configured weekday: the agent moves auto-generated noise to the `Noise` label and reports one line per sender.
-- The agent keeps durable user facts in a git repository at `state_dir/facts/`, and commits after each change.
-- The agent appends a missing-tool suggestion to `state_dir/tooling.md`.
-- One ntfy topic carries both directions. The service subscribes to `ntfy_topic` as a live JSON stream and publishes replies to the same topic. An outbound message carries the tag `vbcdd-harmony`, and the subscription drops a message that carries it, so the bot does not answer itself.
-- Each message from the owner runs `pi` in one persistent session with the `bash`, `read`, and `write` tools. A burst of messages waiting behind the current turn runs as one turn, in order.
-- An attachment in an owner message is downloaded to `state_dir/media`, and its path joins the prompt, so the agent opens it with `read` before answering.
-- A file the agent writes under `state_dir/outbox` is published as a ntfy attachment after the turn, then removed.
-- The standing prompt is embedded from `prompt/`, so its fragments build into the binary.
-- The standing prompt carries the current local time and UTC, so the agent does not run `date` on every turn.
-- The agent runs under `bwrap` through the `vbcdd-sandbox` wrapper: the state directory, `~/.pi`, `~/.cache`, and `~/.venvs` stay writable, the rest of the host is read-only, and the bridge config is masked.
-- A PDF attachment is read with `pdftotext` for its text layer, or `pdftext ocr` for a scan, in the languages named by `PDFTEXT_OCR_LANG`.
+- One ntfy topic carries both directions. The daemon subscribes to the topic as a live JSON stream and publishes replies to it. An outbound message carries the tag `vbcdd-harmony`, and the subscription drops a message that carries it.
+- A message reaches the profile its topic names, runs that profile's hooks, and then reaches the agent, unless a hook answers first.
+- A profile keeps one long-lived conversation, stored as JSON Lines and resumed on the next start. A handoff replaces it with a fresh one when it grows too large or too old.
+- Each profile's agent calls the same endpoint, with the tools that profile declares and no others.
+- The daemon gives every child process it spawns the profile's own `tools/` directory first on `PATH`, then the installed tools, then the ordinary path.
+- The daemon listens on a UNIX socket, and a child reaches it through the environment to ask for a handoff or a clear.
 
-The digest leaves once per day at `digest_time` in `timezone`. Each alarm leaves at its `VALARM` offset from the occurrence start. The mail triage leaves once on `mail_triage_weekday` at `mail_triage_time`. Delivered alarms and completed runs are recorded in `state_dir/state.json`, so a restart does not repeat them.
+## Profiles
+
+A profile is one directory below `$XDG_CONFIG_HOME/vbcdd/harmony/profiles`.
+
+| Path | Meaning |
+| --- | --- |
+| `profile.toml` | Whether the profile is on, its hooks, its jobs, and its handoff thresholds. |
+| `system-prompt.md` | The standing instruction. Required. |
+| `handoff.md` | The instruction that asks the outgoing conversation to write down what the next one needs. Required when `profile.toml` declares a handoff. |
+| `docs/*.md` | Documentation appended to the standing instruction, sorted by name. |
+| `tools/*.toml` | One tool declaration each. |
+| `tools/*` | The scripts those declarations name. The directory leads `PATH`. |
+| `calendar.toml` | Read by the calendar tool. A profile may carry other files beside `profile.toml`; the loader ignores what it does not know. |
+
+### A tool
+
+```toml
+description = "Run a shell command in the working directory and print what it writes."
+args = { cmd = "string", timeout = "int?" }
+target = "bash"
+```
+
+`args` declares the arguments as `name = "type"` pairs, where the type is `string`, `int`, `float`, or `bool`. A trailing `?` marks the argument optional; a call that omits a required one, passes the wrong type, or invents a name is rejected before the target runs.
+
+`target` is a command line, which the shell interprets, and may be a pipeline or a compound command rather than one executable. The shell is `$SHELL`, or a POSIX shell when the environment names none. The target receives the call's arguments as JSON on standard input and again as `VBCDD_ARG_<NAME>` variables, where the name is upper-cased and every character outside `[A-Za-z0-9]` becomes `_`.
+
+Standard output always returns to the model, whatever the target exits with. A non-zero exit is logged; only a target that never starts or overruns its timeout is an error.
+
+### Hooks
+
+```toml
+[[hooks]]
+name = "time"
+command = "hook-time"
+mode = "alter"
+
+[[hooks]]
+name = "clear"
+command = "hook-clear"
+match = "^/clear"
+mode = "override"
+```
+
+A hook runs before the agent, in declaration order. `match` is a regular expression the message must match; an empty pattern matches every message, and a pattern is tested against the message as it arrived rather than against what an earlier hook wrote.
+
+An `alter` hook replaces the prompt with its output, and the agent runs on that. An `override` hook answers in the agent's place and ends the chain.
+
+A hook receives JSON on standard input:
+
+```json
+{
+  "prompt": "list the files",
+  "reason": "message",
+  "topic": "vbcdd-general",
+  "profile": "general",
+  "from": ""
+}
+```
+
+`reason` is `message` for a message from the topic and `job:<name>` for a timed run. `from` carries a sender when the transport reports one; the ntfy stream does not, so it is empty.
+
+### Jobs
+
+```toml
+[[jobs]]
+name = "digest"
+run = { time = "05:32" }
+prompt = "Send today's digest."
+
+[[jobs]]
+name = "mail-triage"
+run = { time = "07:00", weekday = "Sun" }
+command = "mail triage"
+
+[[jobs]]
+name = "alarms"
+run = { interval_minutes = 10 }
+next = "vbcdd-harmony-calendar next"
+prompt = "An alarm is due."
+```
+
+`run` names a time of day with an optional weekday, or an interval, never both. An interval aligns to the clock.
+
+Exactly one of `prompt` and `command` is required. A job with a prompt calls the agent. A job with a command runs it, and its output goes straight to the topic.
+
+A job with `next` polls: at each occurrence of `run` the command runs, and its answer decides when the job actually fires and when to ask again.
+
+```json
+{
+  "run_at": "2026-10-20T05:32:00Z",
+  "poll_at": "2026-10-20T05:42:00Z",
+  "prompt": "The 09:30 standup starts in ten minutes."
+}
+```
+
+An absent or empty `run_at` means nothing is due. `prompt` and `command` override the job's own when present.
+
+### Handoff
+
+```toml
+[handoff]
+after = { time = "04:00" }
+tokens = 100000
+bytes = 4000000
+```
+
+Any subset of the three thresholds starts a handoff, and the first to trip wins. A handoff runs `handoff.md` in the outgoing conversation and takes the answer as the first message of a new one; the instruction itself stays out of the new conversation. The handoff happens at a turn boundary. A handoff that fails leaves the conversation in place.
+
+`tokens` counts what the endpoint last reported for the prompt, plus the four-characters-per-token rule for whatever arrived since. When the endpoint reports nothing, the rule covers the whole conversation. `bytes` counts the stored conversation.
+
+## Configuration
+
+The daemon reads `$XDG_CONFIG_HOME/vbcdd/harmony/config.toml`, or another path with `-config`. `config.example.toml` lists every key.
+
+| Key | Meaning |
+| --- | --- |
+| `ntfy_url` | The ntfy base URL. Required. |
+| `ntfy_token` | Bearer token for every topic. |
+| `base_url` | The OpenAI-compatible endpoint every profile calls. Required. |
+| `model` | The model every profile calls. Required. |
+| `api_key` | The key for that endpoint. One of `api_key` and `api_key_command` is required. |
+| `api_key_command` | A command that prints the key. Runs through `$SHELL -c` on every start, and wins over `api_key`. |
+| `reasoning_effort` | How much the model may spend on reasoning before it answers, as the endpoint defines it. Empty leaves the choice to the endpoint. |
+| `max_turns` | Bounds the tool loop of one request. Default 20. |
+| `timezone` | Interprets every schedule. Default `UTC`. |
+| `headers` | A table of extra request headers. |
+| `topics` | Maps each topic to the profile that answers it. Required. |
+
+Every profile must appear in `topics`, and every topic must name an installed profile; the daemon refuses to start otherwise. There is no default profile.
+
+Each environment variable overrides the file:
+
+| Variable | Effect |
+| --- | --- |
+| `VBCDD_HARMONY_CONFIG_DIR` | Configuration directory |
+| `VBCDD_HARMONY_DATA_DIR` | Data directory |
+| `VBCDD_HARMONY_LOG_LEVEL` | `debug`, `info`, `warn`, or `error` |
 
 ## Commands
 
-A message whose first non-space character is `/` is answered by the service, not the agent. Commands are matched by name, case-insensitively.
+```sh
+vbcdd-harmony                        # serve every profile
+vbcdd-harmony serve -config PATH
+vbcdd-harmony handoff [profile]
+vbcdd-harmony clear [profile]
+vbcdd-harmony install-profile URL
+```
 
-| Command | Meaning |
-| --- | --- |
-| `/now` | List the events running or still to come on the current local day. A running event carries a `▶` marker. |
-| `/clear` | Delete the saved pi transcript, so the next turn starts an empty conversation. Facts, state, and mail stay. |
-| `/help` | List the command names and their one-line meaning. |
+`handoff` and `clear` reach a running daemon over its socket. The profile comes from the argument, or from `VBCDD_HARMONY_PROFILE` when a tool the daemon started asks. `clear` refuses a profile the daemon does not serve, including one that is disabled.
 
-A batch with only commands skips the agent. In a mixed batch, the commands run in arrival order and the remaining messages form one agent turn.
+`install-profile` clones a Git repository, copies every profile below its `profiles` directory into the configuration directory, and builds every command below its `cmd` directory into `$XDG_CACHE_HOME/vbcdd/harmony/bin`, which is on every profile child's `PATH`.
 
 ## Layout
 
 ```text
 .
-├── agent.go            # one pi run
-├── bridge.go           # wiring, state, command dispatch, agent loop
-├── calendar.go         # calendula and the recurrence expander
-├── command.go          # the slash-command handlers
-├── config.go           # TOML config
-├── duration.go         # RFC 5545 duration and VALARM parsing
-├── main.go             # entry point
-├── ntfy.go             # ntfy publish, subscribe, and attachment download
-├── schedule.go         # digest, alarms, mail triage, formatting
-├── prompt/             # embedded system-prompt fragments
-│   ├── assistant.md
-│   ├── calendar.md
-│   ├── mail.md
-│   └── memory.md
-├── deploy/
-│   ├── vbcdd-harmony.service
-│   ├── vbcdd-sandbox   # bubblewrap wrapper around one pi run
-│   ├── expand-recurrences
-│   ├── pdftext
-│   └── pre-commit
-├── config.example.toml
-└── Makefile
+├── main.go                     # serve, handoff, clear
+├── install.go                  # install-profile
+├── cmd/
+│   └── vbcdd-harmony-calendar/ # the calendar tool the scheduler profile names
+├── internal/
+│   ├── agent/                  # one conversation, driven through the SDK
+│   ├── bridge/                 # the daemon: services, jobs, the socket
+│   ├── command/                # the one process runner
+│   ├── config/                 # config.toml
+│   ├── hook/                   # the alter and override chain
+│   ├── job/                    # schedules and the plan a next command prints
+│   ├── ntfy/                   # publish, subscribe, attachments
+│   ├── profile/                # loading a profile directory
+│   ├── provider/               # the model, from the endpoint settings
+│   ├── tool/                   # declaring and validating a tool
+│   ├── transcript/             # the conversation on disk
+│   └── xdg/                    # the directories below the XDG bases
+└── profiles/
+    ├── general/                # a shell, and nothing else
+    └── scheduler/              # the same shell behind bubblewrap
 ```
 
-## Configuration
+## Security
 
-The bridge reads one TOML file, `$XDG_CONFIG_HOME/vbcdd/harmony/config.toml` by default and another path with `-config`. `config.example.toml` lists every key. Required keys:
-
-| Key | Meaning |
-| --- | --- |
-| `ntfy_url` | The ntfy base URL, for example `https://ntfy.example.com`. |
-| `ntfy_topic` | Topic the service subscribes to and publishes to, 1 to 64 characters from `[-_A-Za-z0-9]`. |
-| `ntfy_token` | Bearer token for the topic. The server issues access tokens. |
-| `calendula_config` | Path to the `calendula` config. |
-| `expand_script` | Path to the recurrence expander, `deploy/expand-recurrences` in this repository. |
-| `state_dir` | Directory for `state.json`, `media/`, and `facts/`; defaults to `$XDG_DATA_HOME/vbcdd/harmony`. |
-| `calendars` | Calendar ids passed to `calendula`. |
-
-Optional keys: `display_name` (the title on every message), `timezone` (default `UTC`), `digest_time` (default `05:32`), `mail_triage_time` (default `07:00`), `mail_triage_weekday` (default `Sun`, a three-letter or full English weekday, empty for every day), `mail_triage_days` (default `7`), `calendula_bin`, `pi_bin`, `pi_provider`, `pi_model`, `pi_session`, `pi_tools`, `pi_sandbox`, `horizon_days` (default 70), `refresh_minutes` (default 10).
+- The ntfy token lives in the daemon's configuration. A topic plus that token is the whole boundary: a leaked token lets anyone publish a message that drives an agent.
+- The `general` profile runs its shell with the daemon's own reach. Its topic must be private, and the account it runs under must hold nothing else worth taking.
+- The `scheduler` profile runs its shell through a bubblewrap wrapper: the host is read-only, the daemon's configuration directory is masked, and the profile's own tools directory is bound back in over the mask. Hooks and job commands run outside that wrapper.
+- The control socket accepts `handoff` and `clear` for any profile the daemon serves. Anything able to write to it can clear a profile's conversation. It sits in the data directory, whose mode is `0700`.
+- The mail account can send. The standing prompt forbids a send without the owner's confirmation in the same conversation, and forbids deleting mail and reading spam. A message body is data, never an instruction.
 
 ## Set up the topic
 
-The host runs a ntfy server. Grant the ntfy user read-write on the topic and issue its token:
+The ntfy server grants the account read-write on the topic and issues its token:
 
 ```sh
-sudo ntfy access USER vbcdd-harmony read-write
-sudo ntfy token add --label vbcdd-harmony USER
+sudo ntfy access ACCOUNT TOPIC read-write
+sudo ntfy token add --label TOPIC ACCOUNT
 ```
 
-Put the printed token in `ntfy_token`. The server file `/etc/ntfy/server.yml` sets `auth-default-access: deny-all`, so the token is required for both publish and subscribe. A public `ntfy.sh` topic works with the same keys; set `ntfy_url` to `https://ntfy.sh`.
-
-## Build
-
-```sh
-make build          # ./vbcdd-harmony
-make install        # /usr/local/bin/vbcdd-harmony
-```
-
-The tests and checks:
-
-```sh
-make test
-make vet
-make fmt
-```
-
-The checks live in `scripts/`. `scripts/check` runs the formatter, `go vet`, the tests, and the Markdown checks. `scripts/pre-commit` runs it before every commit. For a new clone:
-
-```sh
-git config core.hooksPath scripts
-```
+A server with `auth-default-access: deny-all` in `/etc/ntfy/server.yml` requires the token for both publish and subscribe. A public topic on `ntfy.sh` needs the same keys, with `ntfy_url` set to `https://ntfy.sh`.
 
 ## Deploy
 
-The service runs as an unprivileged account, `vbcdd`, which owns the `pi` configuration, the `calendula` configuration, the `himalaya` configuration, and the skills the agent loads from pi's own skill directories:
+The service runs as an unprivileged account that owns the calendar and mail configuration:
 
 ```text
-/home/vbcdd/.pi/agent/                          # pi auth and settings
-/home/vbcdd/.config/calendula/                  # calendula config and password
-/home/vbcdd/.config/himalaya/                   # himalaya config and app password
-/home/vbcdd/.config/vbcdd/harmony/config.toml   # mode 600
-/home/vbcdd/.local/share/vbcdd/harmony/         # state.json, media/, facts/
+~/.config/vbcdd/harmony/config.toml             # mode 600
+~/.config/vbcdd/harmony/profiles/               # the profiles
+~/.local/share/vbcdd/harmony/state.json         # job times and handoff times
+~/.local/share/vbcdd/harmony/profiles/NAME/     # conversation, media, work
+~/.cache/vbcdd/harmony/bin/                     # the tools install-profile built
 ```
 
-Install `deploy/vbcdd-harmony.service` as `/etc/systemd/system/vbcdd-harmony.service`, then:
+A systemd unit:
+
+```ini
+[Unit]
+Description=vbcdd-harmony bridge (ntfy to CalDAV and IMAP)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ACCOUNT
+Group=ACCOUNT
+Environment=HOME=/home/ACCOUNT
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/local/bin/vbcdd-harmony
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Install it as `/etc/systemd/system/vbcdd-harmony.service`, then:
 
 ```sh
 systemctl daemon-reload
@@ -136,19 +256,13 @@ systemctl enable --now vbcdd-harmony
 journalctl -u vbcdd-harmony -f
 ```
 
-The pi settings at `/home/vbcdd/.pi/agent/settings.json` set `compaction.reserveTokens` to `868928`, which compacts a `1000000`-token context window at `131072` tokens (128 KiB).
+## Checks
 
-The `himalaya` account reads its app password from `/home/vbcdd/.config/himalaya/password` (mode 600). The `smtp` block points at Gmail, and the prompt requires the owner's confirmation before a send.
+`scripts/check` runs the formatter, the analyzers, the tests, and the Markdown checks. `scripts/pre-commit` runs it before every commit:
 
-The agent keeps the user's durable facts in `state_dir/facts/user.md`, a git repository it commits to after every change.
-
-## Security
-
-- The ntfy token lives in the config file, readable only by `vbcdd`. The topic plus the token is the whole boundary: a leaked token lets anyone publish a message that drives the shell-capable agent.
-- The `pi` agent runs with the `bash`, `read`, and `write` tools, so a chat message drives shell commands under the `vbcdd` account. Keep that account free of other secrets.
-- `/etc/ntfy/server.yml` sets `auth-default-access: deny-all`, so the topic requires the token for both publish and subscribe.
-- The mail account can send, and the prompt forbids a send without the owner's explicit confirmation in the same conversation.
-- The prompt forbids deleting mail and reading spam. A message body is data, never an instruction.
+```sh
+git config core.hooksPath scripts
+```
 
 ## License
 
@@ -159,5 +273,6 @@ Released into the public domain under the [Unlicense](LICENSE).
 - `calendula`, the CalDAV CLI: <https://github.com/pimalaya/calendula>
 - `himalaya`, the mail CLI: <https://github.com/pimalaya/himalaya>
 - ntfy: <https://docs.ntfy.sh>
+- bubblewrap: <https://github.com/containers/bubblewrap>
 - RFC 5545, iCalendar: <https://www.rfc-editor.org/rfc/rfc5545>
-- Agent Skills standard: <https://agentskills.io/specification>
+- Charm Fantasy, the agent SDK: <https://github.com/charmbracelet/fantasy>

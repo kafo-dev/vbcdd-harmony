@@ -1,22 +1,37 @@
+# The daemon's configuration. Every profile has its own directory beside this
+# file, below `profiles/`.
+
 display_name = "vbcdd-harmony"
+
+# The OpenAI-compatible endpoint every profile's agent calls.
+base_url = "https://api.openai.com/v1"
+model = "gpt-4o-mini"
+api_key = "sk-..."
+
+# A command that prints the key. It runs through `$SHELL -c` on every start and
+# wins over `api_key`, which suits a secret manager.
+api_key_command = "op read op://Private/OpenAI/credential"
+
+# How much the model may spend on reasoning before it answers, as the endpoint
+# defines it. An empty value leaves the choice to the endpoint.
+reasoning_effort = "low"
+
+# Bounds on one request.
+max_turns = 20
+
+# Interprets every schedule.
 timezone = "UTC"
-digest_time = "05:32"
-calendars = ["calendar"]
-calendula_bin = "/usr/local/bin/calendula"
-calendula_config = "/home/vbcdd/.config/calendula/config.toml"
-expand_script = "/usr/local/bin/expand-recurrences"
-pi_bin = "/opt/pi-coding-agent/pi"
-pi_provider = "openai.compatible.example.com"
-pi_model = "example-model-name"
-pi_session = "vbcdd-harmony"
-pi_tools = ["bash", "read", "write"]
-pi_sandbox = "/usr/local/bin/vbcdd-sandbox"
-state_dir = "/home/vbcdd/.local/share/vbcdd/harmony"
+
+# The ntfy server, and the token that reaches its topics.
 ntfy_url = "https://ntfy.example.com"
-ntfy_topic = "vbcdd-harmony"
 ntfy_token = "REPLACE_WITH_THE_NTFY_ACCESS_TOKEN"
-horizon_days = 70
-refresh_minutes = 10
-mail_triage_time = "07:00"
-mail_triage_weekday = "Sun"
-mail_triage_days = 7
+
+# Extra request headers.
+[headers]
+"X-Api-Key" = "..."
+
+# Every profile is mapped, and every mapped profile must be installed. The
+# daemon refuses to start when the two do not match.
+[topics]
+"vbcdd-general" = "general"
+"vbcdd-harmony" = "scheduler"
