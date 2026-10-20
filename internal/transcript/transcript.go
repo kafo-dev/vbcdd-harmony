@@ -103,3 +103,16 @@ func (f File) Reset() error {
 	}
 	return nil
 }
+
+// Size reports the size of the stored conversation, in bytes. A conversation
+// that was never written is empty.
+func (f File) Size() (int64, error) {
+	info, err := os.Stat(f.Path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	return info.Size(), nil
+}
