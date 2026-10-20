@@ -34,6 +34,9 @@ type Runner struct {
 	Dir string
 	// Env is the child's whole environment. Nil inherits the parent's.
 	Env []string
+	// Shell interprets a target. Empty takes $SHELL, and a POSIX shell when
+	// the environment names none.
+	Shell string
 	// Timeout bounds one call. Zero leaves it unbounded.
 	Timeout time.Duration
 	// Log receives the diagnostics. Nil drops them.
@@ -44,15 +47,17 @@ type Runner struct {
 	FailOnError bool
 }
 
-// Run runs one command with the given arguments and returns what it prints.
+// Run runs one target and returns what it prints. The target is a command
+// line, which the shell interprets, so a tool may be a pipeline or a compound
+// command rather than one executable.
 //
 // Standard output always returns, whatever the command exits with. A non-zero
 // exit is logged and yields no error, because the output usually explains the
 // failure; a timeout or a command that never starts does yield one.
-func (r Runner) Run(ctx context.Context, name string, args map[string]any) (string, error) {
+func (r Runner) Run(ctx context.Context, target string, args map[string]any) (string, error) {
 	payload, err := json.Marshal(args)
 	if err != nil {
-		return "", fmt.Errorf("%s: encode arguments: %w", name, err)
+		return "", fmt.Errorf("%s: encode arguments: %w", target, err)
 	}
 	if r.Timeout > 0 {
 		var cancel context.CancelFunc
@@ -60,7 +65,8 @@ func (r Runner) Run(ctx context.Context, name string, args map[string]any) (stri
 		defer cancel()
 	}
 
-	cmd := exec.CommandContext(ctx, name)
+	//nolint:gosec // the target comes from the profile, and runs the shell by design.
+	cmd := exec.CommandContext(ctx, r.shell(), "-c", target)
 	cmd.Dir = r.Dir
 	cmd.Env = r.childEnv(args)
 	cmd.Stdin = bytes.NewReader(payload)
@@ -75,19 +81,30 @@ func (r Runner) Run(ctx context.Context, name string, args map[string]any) (stri
 	cmd.Stderr = &stderr
 	err = cmd.Run()
 	if ctx.Err() != nil {
-		return stdout.String(), fmt.Errorf("%s: %w", name, ctx.Err())
+		return stdout.String(), fmt.Errorf("%s: %w", target, ctx.Err())
 	}
 	if err != nil {
 		var exit *exec.ExitError
 		if !errors.As(err, &exit) {
-			return "", fmt.Errorf("%s: %w", name, err)
+			return "", fmt.Errorf("%s: %w", target, err)
 		}
-		r.logf(ctx, "%s exited %d: %s", name, exit.ExitCode(), strings.TrimSpace(stderr.String()))
+		r.logf(ctx, "%s exited %d: %s", target, exit.ExitCode(), strings.TrimSpace(stderr.String()))
 		if r.FailOnError {
-			return stdout.String(), fmt.Errorf("%s exited %d", name, exit.ExitCode())
+			return stdout.String(), fmt.Errorf("%s exited %d", target, exit.ExitCode())
 		}
 	}
 	return stdout.String(), nil
+}
+
+// shell returns the interpreter a target runs under.
+func (r Runner) shell() string {
+	if r.Shell != "" {
+		return r.Shell
+	}
+	if shell := os.Getenv("SHELL"); shell != "" {
+		return shell
+	}
+	return "/bin/sh"
 }
 
 // killGroup kills a command and every process it started. The runner puts the

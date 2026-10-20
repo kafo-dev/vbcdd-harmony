@@ -121,9 +121,27 @@ func TestRunKillsTheWholeGroup(t *testing.T) {
 	}
 }
 
+// TestRunRunsAShellCommandLine checks that a target is a command line rather
+// than one executable, so a tool may be a pipeline or a compound command.
+func TestRunRunsAShellCommandLine(t *testing.T) {
+	t.Parallel()
+	target := `printf '%s' "$VBCDD_ARG_CMD" | tr a-z A-Z`
+	got, err := run(t, Runner{}, target, map[string]any{"cmd": "abc"})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got != "ABC" {
+		t.Fatalf("stdout = %q, want %q", got, "ABC")
+	}
+}
+
+// TestRunReportsAMissingCommand covers a target the shell cannot resolve: the
+// shell itself starts and exits 127, so only a runner that fails on a non-zero
+// exit reports it.
 func TestRunReportsAMissingCommand(t *testing.T) {
 	t.Parallel()
-	if _, err := (Runner{}).Run(context.Background(), "no-such-command-anywhere", nil); err == nil {
+	runner := Runner{FailOnError: true}
+	if _, err := run(t, runner, "no-such-command-anywhere", nil); err == nil {
 		t.Fatal("Run accepted a command that does not exist")
 	}
 }

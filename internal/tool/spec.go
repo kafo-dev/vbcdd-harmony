@@ -1,7 +1,7 @@
-// Package tool declares, validates, and runs the commands a profile exposes to
-// its agent. A tool is one TOML file naming a target command; the target
-// receives a call's arguments as JSON on standard input and answers on
-// standard output.
+// Package tool declares and validates the tools a profile exposes to its
+// agent. A tool is one TOML file naming a target command line; the target runs
+// under the shell, receives a call's arguments as JSON on standard input and
+// again as `VBCDD_ARG_<NAME>` variables, and answers on standard output.
 package tool
 
 import (
@@ -31,9 +31,13 @@ const optionalSuffix = "?"
 // Spec is one tool declaration, read from a TOML file below a profile's tools
 // directory.
 type Spec struct {
-	Description string            `toml:"description"`
-	Args        map[string]string `toml:"args"`
-	Target      string            `toml:"target"`
+	// Description tells the model what the tool does.
+	Description string `toml:"description"`
+	// Args declares the arguments, as `name = "type"` pairs.
+	Args map[string]string `toml:"args"`
+	// Target is the command line the shell runs. It may be a pipeline or a
+	// compound command, not only one executable.
+	Target string `toml:"target"`
 }
 
 // Arg is one argument a tool declares.

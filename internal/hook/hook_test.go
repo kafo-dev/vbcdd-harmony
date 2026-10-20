@@ -14,7 +14,7 @@ import (
 )
 
 // script writes an executable shell script into a temporary directory and
-// returns its path, which doubles as a command name.
+// returns its path, which doubles as a command line.
 func script(t *testing.T, body string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "hook")
