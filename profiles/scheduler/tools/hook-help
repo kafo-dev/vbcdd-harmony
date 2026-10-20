@@ -8,3 +8,4 @@ set -eu
 printf '`/clear` — start an empty conversation\n'
 printf '`/help` — list these commands\n'
 printf '`/now` — what is running now and what is still to come today\n'
+printf '`/week` — the events of the current day and the next seven\n'

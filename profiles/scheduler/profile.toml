@@ -30,6 +30,12 @@ command = "hook-now"
 match = "^/now"
 mode = "override"
 
+[[hooks]]
+name = "week"
+command = "hook-week"
+match = "^/week"
+mode = "override"
+
 # The daily digest, and the weekly mail triage.
 [[jobs]]
 name = "digest"
