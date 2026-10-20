@@ -1,0 +1,21 @@
+# The calendar this profile reads.
+#
+# The daemon passes the profile's own directory in VBCDD_HARMONY_PROFILE_DIR,
+# and this file sits at that directory's root. Edit `calendula_config` for the
+# machine, and name the calendars `calendula` should read.
+
+calendula_bin = "calendula"
+calendula_config = "/home/ACCOUNT/.config/calendula/config.toml"
+
+# `expand-recurrences` sits beside this file, on the same PATH.
+expand_script = "expand-recurrences"
+
+calendars = ["calendar"]
+timezone = "UTC"
+
+# The alarms already delivered, relative to the working directory.
+state = "calendar-state.json"
+
+# How far ahead the calendar is expanded, which bounds how early an alarm can
+# be seen.
+horizon_days = 70

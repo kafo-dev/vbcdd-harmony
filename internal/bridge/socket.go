@@ -19,12 +19,16 @@ import (
 const SocketName = "harmony.sock"
 
 // The variables the daemon gives every child it spawns, so a tool can ask for a
-// handoff or a clear without knowing where it is.
+// handoff or a clear without knowing where it is, and can find the profile it
+// belongs to.
 const (
 	// EnvSocket names the socket.
 	EnvSocket = "VBCDD_HARMONY_SOCKET"
 	// EnvProfile names the profile whose child this is.
 	EnvProfile = "VBCDD_HARMONY_PROFILE"
+	// EnvProfileDir is the profile's own configuration directory, where the
+	// profile's tools keep whatever they ship beside themselves.
+	EnvProfileDir = "VBCDD_HARMONY_PROFILE_DIR"
 )
 
 // socketTimeout bounds one exchange with the daemon.

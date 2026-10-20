@@ -159,6 +159,7 @@ func childEnv(cfg Config, declared profile.Profile) []string {
 		"PATH="+path,
 		EnvSocket+"="+cfg.SocketPath,
 		EnvProfile+"="+declared.Name,
+		EnvProfileDir+"="+declared.Dir,
 	)
 }
 
