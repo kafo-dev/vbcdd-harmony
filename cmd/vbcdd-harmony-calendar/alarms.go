@@ -132,15 +132,7 @@ func upcoming(occs []Occurrence, now time.Time) string {
 		if !occ.Start.After(now) && occ.End.After(now) {
 			marker = "▶"
 		}
-		if occ.AllDay {
-			fmt.Fprintf(&builder, "%s all day — %s", marker, occ.Summary)
-		} else {
-			fmt.Fprintf(&builder, "%s %s–%s — %s",
-				marker, occ.Start.Format("15:04"), occ.End.Format("15:04"), occ.Summary)
-		}
-		if occ.Category != "" && occ.Category != "-" {
-			fmt.Fprintf(&builder, "  [%s]", occ.Category)
-		}
+		writeOccurrence(&builder, occ, marker)
 	}
 	return builder.String()
 }

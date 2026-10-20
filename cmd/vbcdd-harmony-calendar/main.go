@@ -59,6 +59,8 @@ func run(args []string) error {
 		return today(cfg)
 	case "next":
 		return next(cfg)
+	case "week":
+		return week(cfg)
 	default:
 		return fmt.Errorf("unknown command %q", command)
 	}
@@ -75,6 +77,22 @@ func today(cfg *Config) error {
 		return err
 	}
 	fmt.Fprintln(os.Stdout, upcoming(occs, at))
+	return nil
+}
+
+// week prints the events of the current local day and the next seven, one
+// section per day.
+func week(cfg *Config) error {
+	ctx, cancel := context.WithTimeout(context.Background(), readTimeout)
+	defer cancel()
+
+	at := now()
+	from := startOfDay(at).AddDate(0, 0, -1) // A day back, so an overnight event lands on today.
+	occs, err := cfg.calendar().Occurrences(ctx, from, startOfDay(at).AddDate(0, 0, weekDays-1))
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(os.Stdout, weekView(occs, at))
 	return nil
 }
 
