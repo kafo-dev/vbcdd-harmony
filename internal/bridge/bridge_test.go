@@ -2,13 +2,23 @@ package bridge
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"charm.land/fantasy"
+	"charm.land/fantasy/providers/openaicompat"
+
+	"vbcdd.kafo.dev/harmony/internal/command"
+	"vbcdd.kafo.dev/harmony/internal/hook"
 	"vbcdd.kafo.dev/harmony/internal/profile"
+	"vbcdd.kafo.dev/harmony/internal/tool"
 	"vbcdd.kafo.dev/harmony/internal/transcript"
 )
 
@@ -307,4 +317,106 @@ func writeProfile(t *testing.T, declaration string) string {
 		t.Fatalf("WriteFile: %v", err)
 	}
 	return dir
+}
+
+// TestAToolRunsInTheProfileWorkDirectory guards the wiring: a declared tool
+// must run through the profile's own runner, so its target resolves on the
+// profile's PATH and its working directory is the profile's work directory.
+func TestAToolRunsInTheProfileWorkDirectory(t *testing.T) {
+	t.Parallel()
+
+	dataDir := t.TempDir()
+	profileDir := t.TempDir()
+	toolsDir := filepath.Join(profileDir, "tools")
+	if err := os.MkdirAll(toolsDir, 0o700); err != nil {
+		t.Fatalf("mkdir tools: %v", err)
+	}
+	body := "#!/bin/sh\nexec /bin/sh -c \"$VBCDD_ARG_CMD\"\n"
+	if err := os.WriteFile(filepath.Join(toolsDir, "bash"), []byte(body), 0o700); err != nil {
+		t.Fatalf("write tool: %v", err)
+	}
+	spec, err := tool.Parse([]byte("description = \"run\"\nargs = { cmd = \"string\" }\ntarget = \"bash\"\n"))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	declared := profile.Profile{
+		Name:  "general",
+		Dir:   profileDir,
+		Tools: []profile.Tool{{Name: "bash", Spec: spec}},
+	}
+
+	turns := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		turns++
+		if turns == 1 {
+			sse(t, w, map[string]any{"tool_calls": []any{map[string]any{
+				"index": 0, "id": "call_1", "type": "function",
+				"function": map[string]any{"name": "bash", "arguments": `{"cmd":"touch marker"}`},
+			}}}, "tool_calls")
+			return
+		}
+		sse(t, w, map[string]any{"content": "done"}, "stop")
+	}))
+	defer server.Close()
+
+	state, err := loadState(filepath.Join(dataDir, "state.json"))
+	if err != nil {
+		t.Fatalf("loadState: %v", err)
+	}
+	cfg := Config{
+		DisplayName: "t",
+		Model:       bridgeModel(t, server),
+		Topics:      map[string]string{"topic": "general"},
+		Profiles:    []profile.Profile{declared},
+		DataDir:     dataDir,
+		BinDir:      filepath.Join(t.TempDir(), "bin"),
+		SocketPath:  filepath.Join(dataDir, "harmony.sock"),
+		Runner:      command.Runner{},
+		Loc:         time.UTC,
+	}
+	svc, err := newService(cfg, declared, state, time.Now, time.UTC)
+	if err != nil {
+		t.Fatalf("newService: %v", err)
+	}
+	if _, err = svc.turn(context.Background(), hook.Run{
+		Prompt: "go", Reason: "message", Topic: "topic", Profile: "general",
+	}); err != nil {
+		t.Fatalf("turn: %v", err)
+	}
+	marker := filepath.Join(dataDir, "profiles", "general", "work", "marker")
+	if _, err = os.Stat(marker); err != nil {
+		t.Fatalf("the tool did not run in the work directory: %v", err)
+	}
+}
+
+// bridgeModel points a language model at a fake endpoint.
+func bridgeModel(t *testing.T, server *httptest.Server) fantasy.LanguageModel {
+	t.Helper()
+	provider, err := openaicompat.New(
+		openaicompat.WithBaseURL(server.URL),
+		openaicompat.WithAPIKey("key"),
+	)
+	if err != nil {
+		t.Fatalf("provider: %v", err)
+	}
+	lm, err := provider.LanguageModel(context.Background(), "model")
+	if err != nil {
+		t.Fatalf("model: %v", err)
+	}
+	return lm
+}
+
+// sse streams one chunk carrying delta and a finish reason.
+func sse(t *testing.T, w http.ResponseWriter, delta map[string]any, finish any) {
+	t.Helper()
+	raw, err := json.Marshal(map[string]any{
+		"id": "chatcmpl-1", "object": "chat.completion.chunk", "created": 1, "model": "model",
+		"choices": []any{map[string]any{"index": 0, "delta": delta, "finish_reason": finish}},
+		"usage":   map[string]any{"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+	})
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	fmt.Fprintf(w, "data: %s\n\n", raw)
 }

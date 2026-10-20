@@ -102,10 +102,19 @@ func newService(
 	if err != nil {
 		return nil, err
 	}
+	// The runner carries the profile's own working directory and environment,
+	// so a tool reaches the profile's scripts first on PATH and runs where the
+	// profile keeps its files.
+	runner := cfg.Runner
+	runner.Dir = workDir(cfg.DataDir, declared.Name)
+	runner.Env = childEnv(cfg, declared)
+	if err = os.MkdirAll(runner.Dir, 0o700); err != nil {
+		return nil, fmt.Errorf("profile %s: work directory: %w", declared.Name, err)
+	}
 	tools := make([]fantasy.AgentTool, 0, len(declared.Tools))
 	var built fantasy.AgentTool
 	for _, declaredTool := range declared.Tools {
-		built, err = agent.NewTool(declaredTool.Name, declaredTool.Spec, cfg.Runner)
+		built, err = agent.NewTool(declaredTool.Name, declaredTool.Spec, runner)
 		if err != nil {
 			return nil, err
 		}
@@ -127,9 +136,6 @@ func newService(
 	if err != nil {
 		return nil, fmt.Errorf("profile %s: %w", declared.Name, err)
 	}
-	runner := cfg.Runner
-	runner.Dir = workDir(cfg.DataDir, declared.Name)
-	runner.Env = childEnv(cfg, declared)
 	return &service{
 		profile:  declared,
 		topic:    topic,
