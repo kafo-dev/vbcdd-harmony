@@ -1,0 +1,3 @@
+description = "Run a shell command in the working directory and print what it writes. The command runs under bubblewrap, so the host is read-only and the daemon's configuration is out of reach."
+args = { cmd = "string" }
+target = "bash"

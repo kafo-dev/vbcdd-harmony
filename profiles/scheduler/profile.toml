@@ -1,0 +1,54 @@
+# The scheduler profile.
+#
+# The calendar and mail assistant. Every command runs under bubblewrap, so the
+# host is read-only, the daemon's configuration is masked, and the profile's
+# own tools directory is the only part of it that comes back in.
+
+# Prepend the current time, so a long conversation does not run `date` before
+# every answer.
+[[hooks]]
+name = "time"
+command = "hook-time"
+mode = "alter"
+
+# Answer the owner's instructions without the agent.
+[[hooks]]
+name = "clear"
+command = "hook-clear"
+match = "^/clear"
+mode = "override"
+
+[[hooks]]
+name = "help"
+command = "hook-help"
+match = "^/help"
+mode = "override"
+
+[[hooks]]
+name = "now"
+command = "hook-now"
+match = "^/now"
+mode = "override"
+
+# The daily digest, and the weekly mail triage.
+[[jobs]]
+name = "digest"
+run = { time = "05:32" }
+prompt = "Send today's digest: what is on the calendar, and what is waiting in the mail."
+
+[[jobs]]
+name = "mail-triage"
+run = { time = "07:00", weekday = "Sun" }
+prompt = "Triage the last seven days of mail. Archive what needs no answer, and list what does."
+
+# The calendar's own alarms. The command decides when to run and when to be
+# asked again, so an alarm fires when the event says, not on a fixed cadence.
+[[jobs]]
+name = "alarms"
+run = { interval_minutes = 10 }
+next = "vbcdd-harmony-calendar next"
+prompt = "An alarm is due."
+
+[handoff]
+after = { time = "04:00" }
+tokens = 100000

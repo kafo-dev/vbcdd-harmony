@@ -1,0 +1,8 @@
+#!/bin/sh
+
+# An `override` hook: it answers `/clear` in the agent's place.
+
+set -eu
+
+vbcdd-harmony clear
+printf 'Cleared the conversation.\n'

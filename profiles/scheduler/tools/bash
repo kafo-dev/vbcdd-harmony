@@ -1,0 +1,35 @@
+#!/bin/sh
+
+# Run one shell command under bubblewrap. The tool receives its arguments as
+# JSON on standard input and again as VBCDD_ARG_* variables; this one uses the
+# variable, so it needs no JSON parser.
+#
+# The host is read-only, and the daemon's configuration directory is masked, so
+# a command cannot read the ntfy token or another profile's settings. The tools
+# directory this script lives in is bound back in over the mask, because the
+# sandbox would otherwise hide the very scripts it runs. The working directory
+# stays writable, and so do the caches a build needs.
+
+set -eu
+
+HOME=${HOME:?HOME is not set}
+STATE=$(pwd -P)
+TOOLS=$(cd "$(dirname "$0")" && pwd -P)
+
+exec bwrap \
+	--ro-bind / / \
+	--dev /dev \
+	--proc /proc \
+	--tmpfs /tmp \
+	--bind "$STATE" "$STATE" \
+	--bind-try "$HOME/.cache" "$HOME/.cache" \
+	--bind-try "$HOME/.venvs" "$HOME/.venvs" \
+	--bind-try "$HOME/.local/share/uv" "$HOME/.local/share/uv" \
+	--tmpfs "$HOME/.config/vbcdd/harmony" \
+	--ro-bind "$TOOLS" "$TOOLS" \
+	--unshare-all \
+	--share-net \
+	--die-with-parent \
+	--new-session \
+	--chdir "$STATE" \
+	-- /bin/sh -c "$VBCDD_ARG_CMD"

@@ -3,11 +3,11 @@
 # POSIX Shell check: formatter verify and `shellcheck`.
 
 # `extra_paths` names the tracked shell files this check would otherwise miss,
-# because nothing marks them as shell: a deployed helper that carries a `sh`
-# shebang but no `.sh` extension, for instance. `skip_path` names the tracked
-# files the check leaves alone, because another language owns them, such as a
-# generator under `scripts/`. Both take git pathspec syntax, and a space
-# separates two pathspecs.
+# because nothing marks them as shell: a profile tool or hook that carries a
+# `sh` shebang but no `.sh` extension, for instance. `skip_path` names the
+# tracked files the check leaves alone, because another language owns them,
+# such as a generator under `scripts/`. Both take git pathspec syntax, and a
+# space separates two pathspecs.
 
 # `shfmt` enforces the dialect: a Bash-only construct fails to parse under
 # `-ln=posix`, and `shellcheck` reports the rest.
@@ -15,8 +15,8 @@
 set -u
 fail=0
 
-# The sandbox helper carries no `.sh` extension.
-extra_paths='deploy/vbcdd-sandbox'
+# The profile tool and hook scripts carry no `.sh` extension.
+extra_paths='profiles/*/tools/bash profiles/*/tools/hook-*'
 skip_path=''
 
 sh_paths() {

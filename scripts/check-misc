@@ -1,6 +1,7 @@
 #!/bin/sh
 
-# Misc check: formatter verify for JSON, YAML, and TOML.
+# Misc check: formatter verify for JSON, YAML, and TOML, and a guard against a
+# `.gitignore` rule swallowing a file the repository ships.
 
 set -u
 fail=0
@@ -11,6 +12,15 @@ if [ -n "$(git ls-files '*.json' '*.yaml' '*.yml')" ]; then
 fi
 if [ -n "$(git ls-files '*.toml')" ]; then
 	git ls-files -z '*.toml' | xargs -0 taplo fmt --check || fail=1
+fi
+
+# A profile is part of what the repository ships, so an ignore rule that hides
+# one leaves a clone with a profile that does not load.
+ignored=$(git ls-files --others --ignored --exclude-standard -- profiles)
+if [ -n "$ignored" ]; then
+	echo "check-misc: ignored files under profiles/:" >&2
+	echo "$ignored" >&2
+	fail=1
 fi
 
 exit "$fail"

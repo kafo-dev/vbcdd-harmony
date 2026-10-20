@@ -1,0 +1,10 @@
+#!/bin/sh
+
+# shellcheck disable=SC2016
+# An `override` hook: it answers `/help` in the agent's place.
+
+set -eu
+
+printf '`/clear` — start an empty conversation\n'
+printf '`/help` — list these commands\n'
+printf '`/now` — what is running now and what is still to come today\n'

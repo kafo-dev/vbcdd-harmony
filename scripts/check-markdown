@@ -9,8 +9,8 @@
 # fixable formatting `prettier` held. The prose lints cover the rest.
 
 # `skip_path` names the Markdown files this check leaves alone. It takes git
-# pathspec syntax, so a directory (`prompt`) or a glob (`prompt/*.md`) works.
-# Point it at text that instructs a model, or that quotes the patterns it
+# pathspec syntax, so a directory (`profiles`) or a glob (`profiles/*/docs`)
+# works. Point it at text that instructs a model, or that quotes the patterns it
 # catalogs: `vale` and `harper-cli` read that text as the author's own prose,
 # and `rumdl` reads it as a document for a person.
 
@@ -19,7 +19,7 @@ fail=0
 
 cd "$(git rev-parse --show-toplevel)" || exit 1
 
-skip_path='prompt'
+skip_path='profiles'
 ignore='SplitWords,MassNouns,ItsContraction,ThatThan,MissingTo,WrongNegative'
 ignore="$ignore,DisjointPrefixes,CompoundNouns,ExpandConfiguration,ExpandStandardInputAndOutput"
 ignore="$ignore,SpellCheck"

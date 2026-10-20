@@ -1,0 +1,28 @@
+# The general profile.
+#
+# A plain assistant with a shell and no isolation. Anyone who can post to this
+# profile's topic runs shell on the host as the daemon's user, so the topic
+# must be private.
+
+# Prepend the current time, so a long conversation does not run `date` before
+# every answer.
+[[hooks]]
+name = "time"
+command = "hook-time"
+mode = "alter"
+
+# Answer the owner's instructions without the agent.
+[[hooks]]
+name = "clear"
+command = "hook-clear"
+match = "^/clear"
+mode = "override"
+
+[[hooks]]
+name = "help"
+command = "hook-help"
+match = "^/help"
+mode = "override"
+
+[handoff]
+tokens = 100000

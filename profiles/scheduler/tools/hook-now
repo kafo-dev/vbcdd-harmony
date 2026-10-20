@@ -1,0 +1,7 @@
+#!/bin/sh
+
+# An `override` hook: it answers `/now` in the agent's place.
+
+set -eu
+
+exec vbcdd-harmony-calendar today

@@ -1,0 +1,11 @@
+#!/bin/sh
+
+# Run one shell command. The tool receives its arguments as JSON on standard
+# input and again as VBCDD_ARG_* variables; this one uses the variable, so it
+# needs no JSON parser.
+#
+# Nothing here is isolated: the command runs with the daemon's own reach.
+
+set -eu
+
+exec /bin/sh -c "$VBCDD_ARG_CMD"

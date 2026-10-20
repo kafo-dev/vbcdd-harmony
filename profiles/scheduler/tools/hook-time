@@ -1,0 +1,10 @@
+#!/bin/sh
+
+# An `alter` hook: it replaces the prompt with the time followed by the prompt
+# itself, so the model never has to run `date`.
+
+set -eu
+
+printf 'The current local time is %s (%s), %s UTC.\n\n' \
+	"$(date '+%Y-%m-%d %H:%M')" "$(date '+%Z')" "$(date -u '+%H:%M')"
+printf '%s' "$VBCDD_ARG_PROMPT"
