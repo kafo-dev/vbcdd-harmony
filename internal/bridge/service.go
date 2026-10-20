@@ -209,6 +209,13 @@ func mediaDirFor(dataDir, name string) string {
 	return filepath.Join(dataDir, "profiles", name, "media")
 }
 
+// workDir returns where a profile's tools run. It sits apart from the
+// conversation and the attachments, so a tool that lists its own directory
+// does not see the daemon's bookkeeping.
+func workDir(dataDir, name string) string {
+	return filepath.Join(dataDir, "profiles", name, "work")
+}
+
 // transcriptPath returns where a profile keeps its conversation.
 func transcriptPath(dataDir, name string) string {
 	return filepath.Join(dataDir, "profiles", name, "conversation.jsonl")

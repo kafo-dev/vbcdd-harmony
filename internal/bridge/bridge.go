@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -41,6 +42,11 @@ type Config struct {
 	Profiles []profile.Profile
 	// DataDir holds the conversations, the attachments, and the state.
 	DataDir string
+	// BinDir holds the tools `install-profile` built, which every profile's
+	// children reach on their PATH.
+	BinDir string
+	// SocketPath is where the daemon listens for `handoff` and `clear`.
+	SocketPath string
 	// Runner runs the hooks, the jobs, and the tools.
 	Runner command.Runner
 	// Loc interprets every schedule.
@@ -121,20 +127,39 @@ func newService(
 	if err != nil {
 		return nil, fmt.Errorf("profile %s: %w", declared.Name, err)
 	}
+	runner := cfg.Runner
+	runner.Dir = workDir(cfg.DataDir, declared.Name)
+	runner.Env = childEnv(cfg, declared)
 	return &service{
 		profile:  declared,
 		topic:    topic,
 		title:    cfg.DisplayName,
 		client:   ntfy.New(ntfy.Config{BaseURL: cfg.NtfyURL, Topic: topic, Token: cfg.NtfyToken}),
 		agent:    conversation,
-		hooks:    hook.Runner{Command: cfg.Runner},
-		runner:   cfg.Runner,
+		hooks:    hook.Runner{Command: runner},
+		runner:   runner,
 		state:    state,
 		log:      cfg.Log,
 		now:      now,
 		loc:      loc,
 		mediaDir: mediaDirFor(cfg.DataDir, declared.Name),
 	}, nil
+}
+
+// childEnv gives a profile's children the PATH that reaches the profile's own
+// tools first and the installed ones after them, and the two variables that
+// name the daemon and the profile a child belongs to.
+func childEnv(cfg Config, declared profile.Profile) []string {
+	path := strings.Join([]string{
+		filepath.Join(declared.Dir, profile.ToolsDirName),
+		cfg.BinDir,
+		os.Getenv("PATH"),
+	}, string(os.PathListSeparator))
+	return append(os.Environ(),
+		"PATH="+path,
+		EnvSocket+"="+cfg.SocketPath,
+		EnvProfile+"="+declared.Name,
+	)
 }
 
 // Run serves every profile until the context is canceled.
