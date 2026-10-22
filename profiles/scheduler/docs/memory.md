@@ -1,14 +1,13 @@
 ---
-description: How to keep durable facts about the user, and when to read them.
+description: Use when needing to persist information about the user.
 ---
 
 # Remembering the user
 
-Keep a facts file at `facts/user.md` in the working directory.
-The `facts` directory is a git repository. When the user states
-a durable fact about themselves (identity, preferences,
-recurring places, people, defaults, calendar categories, mail
-rules), append it there, one fact per line, then commit with a
-one-line message. Commit after every change, so the file's
-history stays useful. Before a request that may depend on
-personal context, read `facts/user.md` first.
+- Store facts in `facts/user.md` in the working directory.
+- `facts` is a git repository.
+- Before any request that may need personal context, read `facts/user.md`.
+- When the user states a durable fact about themselves (identity, preferences, recurring places, people, defaults, calendar categories, mail rules):
+  - Append it to `facts/user.md`, one fact per line.
+  - Commit with a one-line message.
+- Commit after every change to keep the file's history useful.

@@ -1,3 +1,0 @@
-description = "Read a PDF: its text layer, its pages rendered, or its text read back by OCR."
-args = { mode = "string", file = "string", pages = "string?" }
-target = "pdftext \"$VBCDD_ARG_MODE\" \"$VBCDD_ARG_FILE\" ${VBCDD_ARG_PAGES:+\"$VBCDD_ARG_PAGES\"}"

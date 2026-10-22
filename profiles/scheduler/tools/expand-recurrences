@@ -1,4 +1,9 @@
-#!/opt/rrule-venv/bin/python
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.9"
+# dependencies = ["icalendar", "recurring-ical-events"]
+# ///
+
 """Expand calendar occurrences from a calendula item listing.
 
     calendula -c CONF --json items list CAL > items.json
@@ -57,10 +62,20 @@ def row_of(component, tz, item_id):
     else:
         end = component.get("DTEND") or component.get("DUE")
         end = in_zone(end.dt, tz) if end is not None else None
-        text = f"{start:%H:%M}" if end is None or end == start else f"{start:%H:%M}-{end:%H:%M}"
-    return (start.strftime("%Y-%m-%d"), text, str(component.get("SUMMARY", "?")),
-            categories(component), str(component.get("TRANSP", "-")),
-            component.name, item_id)
+        text = (
+            f"{start:%H:%M}"
+            if end is None or end == start
+            else f"{start:%H:%M}-{end:%H:%M}"
+        )
+    return (
+        start.strftime("%Y-%m-%d"),
+        text,
+        str(component.get("SUMMARY", "?")),
+        categories(component),
+        str(component.get("TRANSP", "-")),
+        component.name,
+        item_id,
+    )
 
 
 def categories(component):
@@ -88,18 +103,31 @@ def window(lo_date, hi_date, tz):
     end_date = hi_date + dt.timedelta(days=1)
     if tz is None:
         return lo_date, end_date
-    return (dt.datetime.combine(lo_date, dt.time(), tzinfo=tz),
-            dt.datetime.combine(end_date, dt.time(), tzinfo=tz))
+    return (
+        dt.datetime.combine(lo_date, dt.time(), tzinfo=tz),
+        dt.datetime.combine(end_date, dt.time(), tzinfo=tz),
+    )
 
 
 def expand(item, lo, end, tz, lo_date, hi_date):
     """Return the TSV rows of one item, or one UNSUPPORTED row."""
     try:
         calendar = icalendar.Calendar.from_ical(item["ical"])
-        occurrences = recurring_ical_events.of(calendar, components=COMPONENTS).between(lo, end)
+        occurrences = recurring_ical_events.of(calendar, components=COMPONENTS).between(
+            lo, end
+        )
     except Exception as err:
-        return [(lo_date.strftime("%Y-%m-%d"), "ALL-DAY", "?", "-", "-", "?",
-                 f"UNSUPPORTED RRULE: {err}")]
+        return [
+            (
+                lo_date.strftime("%Y-%m-%d"),
+                "ALL-DAY",
+                "?",
+                "-",
+                "-",
+                "?",
+                f"UNSUPPORTED RRULE: {err}",
+            )
+        ]
 
     rows, seen = [], set()
     for component in occurrences:
@@ -130,8 +158,9 @@ def expand(item, lo, end, tz, lo_date, hi_date):
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     ap.add_argument("items_json")
     ap.add_argument("--from", dest="lo", required=True, help="YYYY-MM-DD")
     ap.add_argument("--to", dest="hi", required=True, help="YYYY-MM-DD")

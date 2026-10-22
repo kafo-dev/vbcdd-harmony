@@ -6,8 +6,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -136,47 +134,5 @@ func TestSanitizeBase(t *testing.T) {
 		if got := sanitizeBase(in); got != want {
 			t.Errorf("sanitizeBase(%q) = %q, want %q", in, got, want)
 		}
-	}
-}
-
-func TestSendFileHeaders(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	path := filepath.Join(dir, "report.pdf")
-	if err := os.WriteFile(path, []byte("pdf-bytes"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	var (
-		gotMethod string
-		gotHeader http.Header
-		gotBody   string
-	)
-	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
-		gotMethod = r.Method
-		gotHeader = r.Header.Clone()
-		data, _ := io.ReadAll(r.Body)
-		gotBody = string(data)
-	}))
-	defer srv.Close()
-
-	n := &Client{baseURL: srv.URL, topic: "vbcdd-harmony", token: "tok", client: srv.Client()}
-	if err := n.SendFile(context.Background(), path, "report.pdf", "vbcdd-harmony"); err != nil {
-		t.Fatalf("SendFile: %v", err)
-	}
-	if gotMethod != http.MethodPut {
-		t.Errorf("method = %q, want PUT", gotMethod)
-	}
-	if got := gotHeader.Get("Filename"); got != "report.pdf" {
-		t.Errorf("Filename = %q", got)
-	}
-	if got := gotHeader.Get("Authorization"); got != "Bearer tok" {
-		t.Errorf("Authorization = %q", got)
-	}
-	if tags := gotHeader.Get("Tags"); !strings.Contains(tags, markerTag) {
-		t.Errorf("Tags = %q", tags)
-	}
-	if gotBody != "pdf-bytes" {
-		t.Errorf("body = %q", gotBody)
 	}
 }

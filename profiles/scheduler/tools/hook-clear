@@ -5,4 +5,4 @@
 set -eu
 
 vbcdd-harmony clear
-printf 'Cleared the conversation. Facts, state, and mail are untouched.\n'
+echo 'Cleared the agent memory of the conversation.'

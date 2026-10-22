@@ -156,47 +156,6 @@ func (n *Client) publish(ctx context.Context, msg Message, body string) error {
 	return nil
 }
 
-// SendFile publishes one local file as an ntfy attachment. The ntfy API takes
-// the upload in the request body, with the name in the `Filename` header.
-func (n *Client) SendFile(ctx context.Context, path, name, title string) error {
-	ctx, cancel := context.WithTimeout(ctx, sendTimeout)
-	defer cancel()
-
-	file, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	endpoint := n.baseURL + "/" + url.PathEscape(n.topic)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, endpoint, file)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Filename", name)
-	req.Header.Set("Authorization", "Bearer "+n.token)
-	req.Header.Set("Tags", markerTag)
-	if title != "" {
-		req.Header.Set("Title", title)
-	}
-	if info, statErr := file.Stat(); statErr == nil {
-		req.ContentLength = info.Size()
-	}
-
-	resp, err := n.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("publish file: %w", err)
-	}
-	defer resp.Body.Close()
-	if _, err = io.Copy(io.Discard, io.LimitReader(resp.Body, drainBytes)); err != nil {
-		return fmt.Errorf("publish file: drain: %w", err)
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("publish file: %s", resp.Status)
-	}
-	return nil
-}
-
 // Subscribe streams the topic, handing owner messages to the inbox. The loop
 // reconnects after a dropped stream, so a server restart does not end delivery.
 // Outbound messages carry `markerTag`; the subscription drops them.

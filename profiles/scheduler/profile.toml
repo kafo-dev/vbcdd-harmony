@@ -36,11 +36,11 @@ command = "hook-week"
 match = "^/week"
 mode = "override"
 
-# The daily digest, and the weekly mail triage.
+# The daily calendar digest, and the weekly mail triage.
 [[jobs]]
 name = "digest"
 run = { time = "05:32" }
-prompt = "Send today's digest: what is on the calendar, and what is waiting in the mail."
+command = "vbcdd-harmony-calendar today"
 
 [[jobs]]
 name = "mail-triage"
@@ -57,4 +57,4 @@ prompt = "An alarm is due."
 
 [handoff]
 after = { time = "04:00" }
-tokens = 100000
+tokens = 131072
