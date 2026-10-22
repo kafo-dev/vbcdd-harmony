@@ -1,3 +1,7 @@
+---
+description: How to keep durable facts about the user, and when to read them.
+---
+
 # Remembering the user
 
 Keep a facts file at `facts/user.md` in the working directory.

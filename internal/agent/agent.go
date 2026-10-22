@@ -22,8 +22,9 @@ const charsPerToken = 4
 type Config struct {
 	// Model answers every request.
 	Model fantasy.LanguageModel
-	// SystemPrompt stands in front of the conversation.
-	SystemPrompt string
+	// Instructions opens a fresh conversation as its first system message.
+	// Empty leaves the conversation without one.
+	Instructions string
 	// Tools are the tools the model may call.
 	Tools []fantasy.AgentTool
 	// ProviderOptions carries the endpoint-specific settings, such as the
@@ -44,13 +45,14 @@ type Config struct {
 
 // Agent holds one conversation and the engine that advances it.
 type Agent struct {
-	engine      fantasy.Agent
-	transcript  transcript.File
-	handoff     string
-	onText      func(string)
-	onReasoning func(string)
-	maxTurns    int
-	history     []fantasy.Message
+	engine       fantasy.Agent
+	transcript   transcript.File
+	instructions string
+	handoff      string
+	onText       func(string)
+	onReasoning  func(string)
+	maxTurns     int
+	history      []fantasy.Message
 	// reported is the prompt size the endpoint reported for the last request,
 	// or zero when it reported none.
 	reported int
@@ -67,20 +69,30 @@ func New(cfg Config) (*Agent, error) {
 		return nil, err
 	}
 	a := &Agent{
-		transcript:  cfg.Transcript,
-		handoff:     cfg.Handoff,
-		onText:      cfg.OnText,
-		onReasoning: cfg.OnReasoning,
-		maxTurns:    maxTurns,
-		history:     history,
+		transcript:   cfg.Transcript,
+		instructions: cfg.Instructions,
+		handoff:      cfg.Handoff,
+		onText:       cfg.OnText,
+		onReasoning:  cfg.OnReasoning,
+		maxTurns:     maxTurns,
+		history:      history,
 	}
 	a.engine = fantasy.NewAgent(
 		cfg.Model,
-		fantasy.WithSystemPrompt(cfg.SystemPrompt),
 		fantasy.WithTools(cfg.Tools...),
 		fantasy.WithProviderOptions(cfg.ProviderOptions),
 	)
 	return a, nil
+}
+
+// open puts the instructions at the head of an empty conversation.
+func (a *Agent) open() error {
+	if a.instructions == "" {
+		return nil
+	}
+	message := fantasy.NewSystemMessage(a.instructions)
+	a.history = append(a.history, message)
+	return a.transcript.Append(message)
 }
 
 // Ask sends a prompt and returns the assistant's final text.
@@ -105,8 +117,11 @@ func (a *Agent) Handoff(ctx context.Context) error {
 	if err = a.Reset(); err != nil {
 		return err
 	}
+	if err = a.open(); err != nil {
+		return err
+	}
 	seed := fantasy.NewUserMessage(summary)
-	a.history = []fantasy.Message{seed}
+	a.history = append(a.history, seed)
 	if err = a.transcript.Append(seed); err != nil {
 		return err
 	}
@@ -142,6 +157,11 @@ func (a *Agent) Bytes() (int64, error) {
 
 // run advances the conversation by one turn and stores it.
 func (a *Agent) run(ctx context.Context, prompt string) (string, error) {
+	if len(a.history) == 0 {
+		if err := a.open(); err != nil {
+			return "", err
+		}
+	}
 	result, err := a.engine.Stream(ctx, fantasy.AgentStreamCall{
 		Prompt:           prompt,
 		Messages:         a.history,

@@ -1,3 +1,7 @@
+---
+description: How to read and change the calendar with the calendula CLI, including recurring events.
+---
+
 # Calendar
 
 Manage the calendar with the `calendula` CLI and the

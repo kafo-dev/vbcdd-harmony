@@ -126,7 +126,7 @@ func newService(
 	}
 	conversation, err := agent.New(agent.Config{
 		Model:           cfg.Model,
-		SystemPrompt:    systemPrompt(declared),
+		Instructions:    systemMessage(declared),
 		Tools:           tools,
 		ProviderOptions: cfg.ProviderOptions,
 		MaxTurns:        cfg.MaxTurns,
@@ -234,14 +234,20 @@ func topicOf(topics map[string]string, name string) (string, error) {
 	return "", fmt.Errorf("no topic routes to the profile %q", name)
 }
 
-// systemPrompt builds the standing instruction from the profile's prompt and
-// the documentation beside it.
-func systemPrompt(declared profile.Profile) string {
+// systemMessage builds the message that opens a conversation: the profile's
+// instructions, then the documentation it may read on demand.
+func systemMessage(declared profile.Profile) string {
 	var builder strings.Builder
-	builder.WriteString(declared.SystemPrompt)
-	for _, doc := range declared.Docs {
-		builder.WriteString("\n\n")
-		builder.WriteString(doc.Body)
+	builder.WriteString(declared.Instructions)
+	if len(declared.Docs) > 0 {
+		builder.WriteString("\n\n# Documentation\n\n")
+		builder.WriteString("Read the file that covers your task before you start it.\n")
+		for _, doc := range declared.Docs {
+			builder.WriteString("\n- `")
+			builder.WriteString(doc.Path)
+			builder.WriteString("`: ")
+			builder.WriteString(doc.Description)
+		}
 	}
-	return builder.String()
+	return strings.TrimSpace(builder.String())
 }

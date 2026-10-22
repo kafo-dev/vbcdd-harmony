@@ -105,7 +105,7 @@ func TestAskRecordsTheConversation(t *testing.T) {
 	file := conversation(t)
 	a, err := New(Config{
 		Model:        model(t, server),
-		SystemPrompt: "be brief",
+		Instructions: "be brief",
 		MaxTurns:     4,
 		Transcript:   file,
 		OnText:       func(s string) { streamed.WriteString(s) },
@@ -137,8 +137,9 @@ func TestAskRecordsTheConversation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if len(stored) != 2 || stored[0].Role != fantasy.MessageRoleUser || stored[1].Role != fantasy.MessageRoleAssistant {
-		t.Fatalf("stored = %+v, want the prompt and the answer", stored)
+	if len(stored) != 3 || stored[0].Role != fantasy.MessageRoleSystem ||
+		stored[1].Role != fantasy.MessageRoleUser || stored[2].Role != fantasy.MessageRoleAssistant {
+		t.Fatalf("stored = %+v, want the instructions, the prompt, and the answer", stored)
 	}
 }
 
@@ -278,6 +279,38 @@ func TestHandoffStartsAFreshConversation(t *testing.T) {
 	}
 	if len(stored) != 1 {
 		t.Fatalf("stored = %d messages, want the conversation replaced", len(stored))
+	}
+}
+
+func TestHandoffReinsertsTheInstructions(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		headers(w)
+		text(t, w, "we were listing the files", nil)
+	}))
+	defer server.Close()
+
+	file := conversation(t)
+	if err := file.Append(fantasy.NewUserMessage("old message")); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+	a, err := New(Config{
+		Model:        model(t, server),
+		Instructions: "be brief",
+		Handoff:      "write down what the next conversation needs",
+		MaxTurns:     2,
+		Transcript:   file,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if err = a.Handoff(context.Background()); err != nil {
+		t.Fatalf("Handoff: %v", err)
+	}
+	history := a.History()
+	if len(history) != 2 || history[0].Role != fantasy.MessageRoleSystem ||
+		history[1].Role != fantasy.MessageRoleUser {
+		t.Fatalf("history = %+v, want the instructions then the summary", history)
 	}
 }
 

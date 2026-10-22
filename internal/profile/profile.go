@@ -1,7 +1,8 @@
 // Package profile loads the profiles a daemon serves. A profile is one
-// directory below the profiles root: a standing prompt, the documentation it
-// adds to that prompt, the tools its agent may call, the hooks that rewrite or
-// answer a message before the agent sees it, and the timed jobs it runs.
+// directory below the profiles root: the instructions that open its
+// conversation, the documentation its agent reads on demand, the tools its
+// agent may call, the hooks that rewrite or answer a message before the agent
+// sees it, and the timed jobs it runs.
 package profile
 
 import (
@@ -23,11 +24,11 @@ import (
 const (
 	// FileName is the file that declares a profile.
 	FileName = "profile.toml"
-	// PromptName is the file that holds the standing instruction.
-	PromptName = "system-prompt.md"
 	// HandoffName is the file that holds the handoff instruction.
 	HandoffName = "handoff.md"
-	// DocsDirName holds the documentation added to the standing instruction.
+	// InstructionsDirName holds the instructions that open the conversation.
+	InstructionsDirName = "instructions"
+	// DocsDirName holds the documentation the agent reads on demand.
 	DocsDirName = "docs"
 	// ToolsDirName holds one TOML file per tool.
 	ToolsDirName = "tools"
@@ -50,8 +51,8 @@ type Profile struct {
 	Name string
 	// Dir is the profile directory.
 	Dir string
-	// SystemPrompt is the standing instruction, from [PromptName].
-	SystemPrompt string
+	// Instructions opens every conversation, from the instruction files.
+	Instructions string
 	// Docs are the files below the docs directory, sorted by name.
 	Docs []Doc
 	// Tools are the tools below the tools directory, sorted by name.
@@ -104,10 +105,12 @@ type Tool struct {
 	Spec tool.Spec
 }
 
-// Doc is one documentation file a profile adds to its standing prompt.
+// Doc is one documentation file a profile lists for its agent to read on
+// demand. The agent sees the path and the description; the body stays on disk.
 type Doc struct {
-	Name string
-	Body string
+	Name        string
+	Path        string
+	Description string
 }
 
 // Hook is one command that runs before a message reaches the agent.
@@ -273,15 +276,13 @@ func Load(dir string) (Profile, error) {
 	if err = toml.Unmarshal(raw, &declared); err != nil {
 		return Profile{}, fmt.Errorf("%s: %w", filepath.Join(dir, FileName), err)
 	}
-	prompt, err := loadPrompt(dir)
-	if err != nil {
-		return Profile{}, err
-	}
 	p := Profile{
-		Name:         name,
-		Dir:          dir,
-		SystemPrompt: prompt,
-		enabled:      declared.Enabled,
+		Name:    name,
+		Dir:     dir,
+		enabled: declared.Enabled,
+	}
+	if p.Instructions, err = loadInstructions(dir); err != nil {
+		return Profile{}, err
 	}
 	if p.Docs, err = loadDocs(dir); err != nil {
 		return Profile{}, err
@@ -303,18 +304,38 @@ func Load(dir string) (Profile, error) {
 	return p, nil
 }
 
-// loadPrompt reads the standing instruction, which every profile must carry.
-func loadPrompt(dir string) (string, error) {
-	path := filepath.Join(dir, PromptName)
-	body, err := os.ReadFile(path)
+// loadInstructions reads the instruction files, sorted by name and joined into
+// one message. A profile may carry none.
+func loadInstructions(dir string) (string, error) {
+	root := filepath.Join(dir, InstructionsDirName)
+	entries, err := os.ReadDir(root)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
 		return "", err
 	}
-	return string(body), nil
+	var (
+		parts []string
+		body  []byte
+	)
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
+			continue
+		}
+		if body, err = os.ReadFile(filepath.Join(root, entry.Name())); err != nil {
+			return "", err
+		}
+		if text := strings.TrimSpace(string(body)); text != "" {
+			parts = append(parts, text)
+		}
+	}
+	return strings.Join(parts, "\n\n"), nil
 }
 
-// loadDocs reads the documentation files, sorted by name so the prompt they
-// build does not move between runs.
+// loadDocs reads the documentation files, sorted by name so the list they build
+// does not move between runs. Each file names itself to the agent through the
+// description in its frontmatter.
 func loadDocs(dir string) ([]Doc, error) {
 	root := filepath.Join(dir, DocsDirName)
 	entries, err := os.ReadDir(root)
@@ -327,15 +348,20 @@ func loadDocs(dir string) ([]Doc, error) {
 	var (
 		docs []Doc
 		body []byte
+		note string
 	)
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
 			continue
 		}
-		if body, err = os.ReadFile(filepath.Join(root, entry.Name())); err != nil {
+		path := filepath.Join(root, entry.Name())
+		if body, err = os.ReadFile(path); err != nil {
 			return nil, err
 		}
-		docs = append(docs, Doc{Name: entry.Name(), Body: string(body)})
+		if note, err = description(path, string(body)); err != nil {
+			return nil, err
+		}
+		docs = append(docs, Doc{Name: entry.Name(), Path: path, Description: note})
 	}
 	sort.Slice(docs, func(i, j int) bool { return docs[i].Name < docs[j].Name })
 	return docs, nil

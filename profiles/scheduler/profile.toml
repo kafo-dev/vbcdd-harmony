@@ -2,7 +2,7 @@
 #
 # The calendar and mail assistant. Every command runs under bubblewrap, so the
 # host is read-only, the daemon's configuration is masked, and the profile's
-# own tools directory is the only part of it that comes back in.
+# own tools and docs directories are the only part of it that come back in.
 
 # Prepend the current time, so a long conversation does not run `date` before
 # every answer.

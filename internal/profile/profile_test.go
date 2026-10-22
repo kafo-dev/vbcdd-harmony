@@ -23,7 +23,7 @@ func build(t *testing.T, root, name, declaration string) string {
 	t.Helper()
 	dir := filepath.Join(root, name)
 	write(t, filepath.Join(dir, FileName), declaration)
-	write(t, filepath.Join(dir, PromptName), "be brief")
+	write(t, filepath.Join(dir, InstructionsDirName, "agent.md"), "be brief")
 	return dir
 }
 
@@ -57,8 +57,8 @@ command = "notify"
 func TestLoadReadsAProfile(t *testing.T) {
 	t.Parallel()
 	dir := build(t, t.TempDir(), "scheduler", fullDeclaration)
-	write(t, filepath.Join(dir, DocsDirName, "b.md"), "second")
-	write(t, filepath.Join(dir, DocsDirName, "a.md"), "first")
+	write(t, filepath.Join(dir, DocsDirName, "b.md"), "---\ndescription: second\n---\n# B\n")
+	write(t, filepath.Join(dir, DocsDirName, "a.md"), "---\ndescription: first\n---\n# A\n")
 	write(t, filepath.Join(dir, DocsDirName, "ignored.txt"), "no")
 	write(t, filepath.Join(dir, ToolsDirName, "bash.toml"), "description = \"d\"\ntarget = \"bash\"\n")
 	write(t, filepath.Join(dir, ToolsDirName, "calendar.toml"), "description = \"d\"\ntarget = \"cal\"\n")
@@ -70,14 +70,18 @@ func TestLoadReadsAProfile(t *testing.T) {
 	if p.Name != "scheduler" || p.Dir != dir {
 		t.Errorf("name = %q, dir = %q", p.Name, p.Dir)
 	}
-	if strings.TrimSpace(p.SystemPrompt) != "be brief" {
-		t.Errorf("prompt = %q", p.SystemPrompt)
+	if strings.TrimSpace(p.Instructions) != "be brief" {
+		t.Errorf("instructions = %q", p.Instructions)
 	}
 	if !p.On() {
 		t.Error("On = false, want the declared true")
 	}
-	if len(p.Docs) != 2 || p.Docs[0].Name != "a.md" || p.Docs[1].Name != "b.md" {
-		t.Fatalf("docs = %+v, want a.md then b.md", p.Docs)
+	if len(p.Docs) != 2 || p.Docs[0].Name != "a.md" || p.Docs[0].Description != "first" ||
+		p.Docs[1].Name != "b.md" || p.Docs[1].Description != "second" {
+		t.Fatalf("docs = %+v, want a.md then b.md with their descriptions", p.Docs)
+	}
+	if want := filepath.Join(dir, DocsDirName, "a.md"); p.Docs[0].Path != want {
+		t.Errorf("doc path = %q, want %q", p.Docs[0].Path, want)
 	}
 	if len(p.Tools) != 2 || p.Tools[0].Name != "bash" || p.Tools[1].Name != "calendar" {
 		t.Fatalf("tools = %+v, want bash then calendar", p.Tools)
@@ -105,6 +109,21 @@ func TestLoadAcceptsAMinimalProfile(t *testing.T) {
 	}
 	if p.Docs != nil || p.Tools != nil || p.Hooks != nil || p.Jobs != nil {
 		t.Errorf("optional parts = %+v, want none", p)
+	}
+}
+
+func TestLoadJoinsTheInstructions(t *testing.T) {
+	t.Parallel()
+	dir := filepath.Join(t.TempDir(), "plain")
+	write(t, filepath.Join(dir, FileName), "")
+	write(t, filepath.Join(dir, InstructionsDirName, "b.md"), "second")
+	write(t, filepath.Join(dir, InstructionsDirName, "a.md"), "first")
+	p, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if p.Instructions != "first\n\nsecond" {
+		t.Fatalf("instructions = %q, want the two files joined in name order", p.Instructions)
 	}
 }
 
@@ -149,12 +168,18 @@ func TestLoadRejectsBadProfiles(t *testing.T) {
 				t.Fatal(err)
 			}
 		}, "profile.toml"},
-		{"missing prompt", "plain", func(t *testing.T, dir string) {
+		{"doc without frontmatter", "plain", func(t *testing.T, dir string) {
 			t.Helper()
-			if err := os.Remove(filepath.Join(dir, PromptName)); err != nil {
-				t.Fatal(err)
-			}
-		}, "system-prompt.md"},
+			write(t, filepath.Join(dir, DocsDirName, "a.md"), "# A\n")
+		}, "no frontmatter"},
+		{"doc without a description", "plain", func(t *testing.T, dir string) {
+			t.Helper()
+			write(t, filepath.Join(dir, DocsDirName, "a.md"), "---\nname: a\n---\n# A\n")
+		}, "no description"},
+		{"doc with an empty description", "plain", func(t *testing.T, dir string) {
+			t.Helper()
+			write(t, filepath.Join(dir, DocsDirName, "a.md"), "---\ndescription:\n---\n# A\n")
+		}, "description is empty"},
 		{"invalid TOML", "plain", func(t *testing.T, dir string) {
 			t.Helper()
 			write(t, filepath.Join(dir, FileName), "enabled = ")

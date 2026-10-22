@@ -139,15 +139,27 @@ func TestTopicOf(t *testing.T) {
 	}
 }
 
-func TestSystemPromptJoinsTheDocs(t *testing.T) {
+func TestSystemMessageJoinsTheInstructionsAndDocs(t *testing.T) {
 	t.Parallel()
-	got := systemPrompt(profile.Profile{
-		SystemPrompt: "be brief",
-		Docs:         []profile.Doc{{Name: "a.md", Body: "first"}, {Name: "b.md", Body: "second"}},
+	got := systemMessage(profile.Profile{
+		Instructions: "be brief",
+		Docs: []profile.Doc{
+			{Name: "a.md", Path: "/p/docs/a.md", Description: "first"},
+			{Name: "b.md", Path: "/p/docs/b.md", Description: "second"},
+		},
 	})
-	want := "be brief\n\nfirst\n\nsecond"
-	if got != want {
-		t.Fatalf("prompt = %q, want %q", got, want)
+	for _, want := range []string{"be brief", "/p/docs/a.md", "first", "/p/docs/b.md", "second"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("message = %q, want it to mention %q", got, want)
+		}
+	}
+}
+
+func TestSystemMessageWithoutDocs(t *testing.T) {
+	t.Parallel()
+	got := systemMessage(profile.Profile{Instructions: "be brief"})
+	if got != "be brief" {
+		t.Fatalf("message = %q, want the instructions alone", got)
 	}
 }
 
@@ -313,7 +325,11 @@ func writeProfile(t *testing.T, declaration string) string {
 	if err := os.WriteFile(filepath.Join(dir, profile.FileName), []byte(declaration), 0o600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, profile.PromptName), []byte("be brief"), 0o600); err != nil {
+	instructions := filepath.Join(dir, profile.InstructionsDirName)
+	if err := os.MkdirAll(instructions, 0o700); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(instructions, "general.md"), []byte("be brief"), 0o600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 	return dir

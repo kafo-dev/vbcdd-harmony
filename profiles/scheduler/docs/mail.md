@@ -1,3 +1,7 @@
+---
+description: How to read, triage, and send mail with the himalaya CLI, and the rules that forbid a send, a delete, and reading spam.
+---
+
 # Mail
 
 Manage the Gmail account with the `himalaya` CLI and the

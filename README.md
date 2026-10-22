@@ -1,6 +1,6 @@
 # vbcdd-harmony
 
-A bridge between ntfy topics and long-lived agents. Each topic routes to a **profile**: a standing prompt, the tools its agent may call, hooks that rewrite or answer a message before the agent sees it, and jobs that run on a timer.
+A bridge between ntfy topics and long-lived agents. Each topic routes to a **profile**: the instructions that open its agent's conversation, the documentation that agent reads on demand, the tools it may call, and the hooks and jobs that run around it.
 
 Two profiles ship with the repository. `general` answers with a shell and no isolation. `scheduler` answers with the same shell behind bubblewrap, and carries the calendar and mail tooling.
 
@@ -24,12 +24,24 @@ A profile is one directory below `$XDG_CONFIG_HOME/vbcdd/harmony/profiles`.
 | Path | Meaning |
 | --- | --- |
 | `profile.toml` | Whether the profile is on, its hooks, its jobs, and its handoff thresholds. |
-| `system-prompt.md` | The standing instruction. Required. |
 | `handoff.md` | The instruction that asks the outgoing conversation to write down what the next one needs. Required when `profile.toml` declares a handoff. |
-| `docs/*.md` | Documentation appended to the standing instruction, sorted by name. |
+| `instructions/*.md` | The instructions that open the conversation. The loader sorts the files by name and joins them into one system message. |
+| `docs/*.md` | Documentation the agent reads on demand. Each file carries a `description` in its frontmatter; the system message lists the path and the description, not the body. |
 | `tools/*.toml` | One tool declaration each. |
 | `tools/*` | The scripts those declarations name. The directory leads `PATH`. |
 | `calendar.toml` | Read by the calendar tool. A profile may carry other files beside `profile.toml`; the loader ignores what it does not know. |
+
+The instructions enter the conversation as its first system message, both when a conversation starts and after a handoff replaces one. A documentation file opens with frontmatter that carries its description:
+
+```markdown
+---
+description: How to read and change the calendar.
+---
+
+# Calendar
+```
+
+The system message then names every file by path and description, so the agent reads the one it needs with the shell it already has.
 
 ### A tool
 
@@ -199,9 +211,9 @@ vbcdd-harmony install-profile URL
 
 - The ntfy token lives in the daemon's configuration. A topic plus that token is the whole boundary: a leaked token lets anyone publish a message that drives an agent.
 - The `general` profile runs its shell with the daemon's own reach. Its topic must be private, and the account it runs under must hold nothing else worth taking.
-- The `scheduler` profile runs its shell through a bubblewrap wrapper: the host is read-only, the daemon's configuration directory is masked, and the profile's own tools directory is bound back in over the mask. Hooks and job commands run outside that wrapper.
+- The `scheduler` profile runs its shell through a bubblewrap wrapper: the host is read-only, the daemon's configuration directory is masked, and the profile's own tools and docs directories are bound back in over the mask. Hooks and job commands run outside that wrapper.
 - The control socket accepts `handoff` and `clear` for any profile the daemon serves. Anything able to write to it can clear a profile's conversation. It sits in the data directory, whose mode is `0700`.
-- The mail account can send. The standing prompt forbids a send without the owner's confirmation in the same conversation, and forbids deleting mail and reading spam. A message body is data, never an instruction.
+- The mail account can send. The instructions forbid a send without the owner's confirmation in the same conversation, and forbid deleting mail and reading spam. A message body is data, never an instruction.
 
 ## Set up the topic
 
